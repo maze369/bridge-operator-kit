@@ -234,6 +234,14 @@ Tail the logs to watch progress:
 Look for `signing checkpoint, index: NNN` lines that increment over time.
 Press Ctrl+C to detach from logs — the container keeps running.
 
+> **Note — validators sign forward-only.** A freshly-started validator
+> doesn't backfill *signatures* for past checkpoints. It catches up the
+> merkle tree to the chain head and then signs every new checkpoint from
+> that moment onward. If you join an active bridge, your first sigs land
+> as new bridge messages flow through — until someone bridges, your
+> sigs directory will only contain `announcement.json` and
+> `metadata_latest.json`. That's normal.
+
 ---
 
 ## Step 11 — Tell the admin
@@ -280,15 +288,20 @@ Repeat Steps 6–11 in each additional chain's directory:
 ```bash
 cd ~/bridge-operator-kit/chains/qom/validator
 cp .env.example .env
-# Copy the SAME VALIDATOR_KEY value from your first chain's .env
-# Edit OPERATOR_NAME + bucket creds (same bucket is fine — sigs go in a
-# per-chain subdir automatically)
+# In the new .env:
+#   - OPERATOR_NAME=your-handle    (SAME as your first chain — one identity)
+#   - VALIDATOR_KEY=0x...          (SAME hex value from first chain's .env)
+#   - CHECKPOINT_SYNCER_TYPE=...   (same as first chain)
+#   - bucket creds                 (same bucket if Option A — sigs go in a
+#                                   per-chain subdir under the operator
+#                                   prefix automatically)
 ./drive.sh up -d
 ```
 
-**Reuse the same validator key across all chains you watch.** One
-identity per operator across the whole bridge keeps ISM management
-simple.
+**Reuse the same OPERATOR_NAME *and* VALIDATOR_KEY across every chain
+you watch.** One identity per operator across the whole bridge keeps ISM
+management simple — the admin adds one address to every chain's ISM
+instead of one address per (operator, chain) pair.
 
 ---
 
@@ -301,6 +314,7 @@ simple.
 | Validator logs say `tokens_needed: N — Please send tokens to your chain signer address` | You skipped Step 9. Send native gas to your validator address. |
 | Validator backfill seems stuck | Backfill from `index.from` in the chain's `chain.yaml` can take 5-15 min on first boot. If still stuck after 30 min, check network connectivity to the chain's RPC: `curl -sf -X POST <chain's first RPC> -d '{"jsonrpc":"2.0","method":"eth_blockNumber","id":1}'` |
 | `./drive.sh up` exits with no .env | Did you forget `cp .env.example .env`? |
+| Validator crash-loops with `Provided config path via CONFIG_FILES is not a file ("/config/agent-config.json")` | Old drive.sh versions could leave `shared/agent-config.json` as a directory if the first run tried to start the agent before `tools/node_modules` was installed. Fix: `./drive.sh down`, then `sudo rm -rf <kit-root>/shared/agent-config.json`, then `drive.sh up -d` — the current drive.sh installs tools deps automatically before building the config. |
 
 ---
 

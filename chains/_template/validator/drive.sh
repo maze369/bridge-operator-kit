@@ -80,9 +80,25 @@ export COMPOSE_PROJECT_NAME="${CHAIN_KEY}-validator-${OPERATOR_NAME:-default}"
 
 # Rebuild the consolidated agent-config from every chains/*/chain.yaml
 # before bringing the agent up. Idempotent — same input == same output.
+#
+# On a fresh clone, tools/node_modules is empty, so build_agent_config.mjs
+# (which imports `yaml`) crashes. If we let docker compose start before
+# the agent-config file exists as a file, Docker creates the bind target
+# as a *directory* and the validator crash-loops forever. So: install
+# tools deps first if missing, THEN build the config, THEN start.
 if [ -x "$KIT_ROOT/tools/build_agent_config.sh" ]; then
     "$KIT_ROOT/tools/build_agent_config.sh"
 elif [ -f "$KIT_ROOT/tools/build_agent_config.mjs" ]; then
+    if [ ! -d "$KIT_ROOT/tools/node_modules" ]; then
+        echo "[drive] tools/node_modules missing — installing kit deps (one-time)…"
+        if command -v node &>/dev/null && command -v npm &>/dev/null; then
+            (cd "$KIT_ROOT/tools" && npm install --silent)
+        else
+            docker run --rm \
+              -v "$KIT_ROOT":/work -w /work/tools \
+              node:20-bookworm-slim npm install --silent
+        fi
+    fi
     if command -v node &>/dev/null; then
         node "$KIT_ROOT/tools/build_agent_config.mjs"
     else
@@ -91,6 +107,19 @@ elif [ -f "$KIT_ROOT/tools/build_agent_config.mjs" ]; then
           -v "$KIT_ROOT":/work -w /work \
           node:20-bookworm-slim node tools/build_agent_config.mjs
     fi
+fi
+
+# Guard: if agent-config.json ended up as a directory (legacy bug —
+# fixed by the deps-install above, but kept for users on old kits who
+# already have the broken state on disk), fail loudly.
+if [ -d "$KIT_ROOT/shared/agent-config.json" ]; then
+    echo "ERROR: $KIT_ROOT/shared/agent-config.json is a directory."
+    echo "       This happens on older kit versions when build_agent_config.mjs"
+    echo "       fails (missing deps) and Docker then creates the bind target"
+    echo "       as a directory. Fix:"
+    echo "         sudo rm -rf '$KIT_ROOT/shared/agent-config.json'"
+    echo "         bash $0 ${1:-up} ${@:2}    # rerun — the dep install above will succeed now"
+    exit 1
 fi
 
 # Permissions: container runs as UID 1000.
