@@ -82,7 +82,7 @@ function uiToken(presets, states, srcChain, srcSymbol, dstChain, dstSymbol) {
   if (!srcRouter || !dstRouter) return null;
   const srcKind = KIND_TO_UI[srcRouter.kind] || 'unknown';
   const dstKind = KIND_TO_UI[dstRouter.kind] || 'unknown';
-  const src = { kind: srcKind, router: srcRouter.address };
+  const src = { kind: srcKind, router: srcRouter.address, symbol: srcSymbol };
   const dst = { kind: dstKind, router: dstRouter.address, symbol: dstSymbol };
   if (srcKind === 'collateral' && srcRouter.underlying) src.erc20 = srcRouter.underlying;
   if (dstKind === 'collateral' && dstRouter.underlying) dst.erc20 = dstRouter.underlying;
