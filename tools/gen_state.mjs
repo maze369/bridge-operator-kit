@@ -66,6 +66,7 @@ function uiChain(key, preset, state) {
     scan: preset.blockExplorer || '',
     color: colorFor(key, preset),
     mailbox: preset.hyperlane?.mailbox || '',
+    validatorAnnounce: preset.hyperlane?.validatorAnnounce || '',
     native: preset.native || { symbol: key.toUpperCase(), decimals: 18 },
     legacyGasPrice: preset.transactionOverrides?.gasPrice || null,
     // Cross-chain live state (current ISM, validator set, threshold).
