@@ -1,0 +1,14 @@
+{
+  "name": "bridge-recovery",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Recovery + verification scripts. Run `npm install` once before `node verify_bridge_health.mjs`.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ethers": "^6.13.4",
+    "yaml": "^2.6.0"
+  }
+}

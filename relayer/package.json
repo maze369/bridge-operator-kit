@@ -1,0 +1,14 @@
+{
+  "name": "bridge-relayer-kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Relayer-operator scripts for the Hyperlane bridge. Run `npm install` once before running 01_setup.sh / status.sh.",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ethers": "^6.13.4",
+    "yaml": "^2.6.0"
+  }
+}

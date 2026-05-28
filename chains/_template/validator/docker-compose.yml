@@ -1,0 +1,55 @@
+# Validator for a single chain. The chain is determined by the
+# directory this compose file lives in — drive.sh extracts the key
+# from `../chain.yaml` and exports it as $CHAIN_KEY.
+#
+# This file is identical across every chain preset. Customising the
+# chain's RPC, gas, mailbox etc. is done in ../chain.yaml. The agent
+# reads /config/agent-config.json, which is generated from every
+# chains/*/chain.yaml by tools/build_agent_config.mjs (drive.sh runs
+# the build on every `up`, so the agent always sees a fresh config).
+#
+# Per-host RPC override: set <CHAIN_KEY_UPPERCASE>_RPC in .env to
+# point at your own node / VPN / paid RPC. Empty = agent uses the
+# RPC URLs from chain.yaml.
+
+services:
+  validator:
+    image: ${HYPERLANE_AGENT_IMAGE:-gcr.io/abacus-labs-dev/hyperlane-agent:main}
+    container_name: bridge-validator-${CHAIN_KEY}-${OPERATOR_NAME:-default}
+    restart: unless-stopped
+    command: ./validator
+    environment:
+      CONFIG_FILES: /config/agent-config.json
+      HYP_ORIGINCHAINNAME: ${CHAIN_KEY}
+      HYP_VALIDATOR_TYPE: hexKey
+      HYP_VALIDATOR_KEY: ${VALIDATOR_KEY}
+      HYP_REORGPERIOD: ${CHAIN_REORG_PERIOD:-5}
+      HYP_INTERVAL: "5"
+      HYP_DB: /data/validator-db
+      HYP_CHECKPOINTSYNCER_TYPE: ${CHECKPOINT_SYNCER_TYPE:-s3}
+      # S3 / R2 fields (used when CHECKPOINT_SYNCER_TYPE=s3)
+      HYP_CHECKPOINTSYNCER_BUCKET: ${CHECKPOINT_SYNCER_BUCKET:-}
+      HYP_CHECKPOINTSYNCER_REGION: ${CHECKPOINT_SYNCER_REGION:-auto}
+      HYP_CHECKPOINTSYNCER_FOLDER: ${CHAIN_KEY}
+      AWS_ACCESS_KEY_ID: ${CHECKPOINT_SYNCER_ACCESS_KEY:-}
+      AWS_SECRET_ACCESS_KEY: ${CHECKPOINT_SYNCER_SECRET_KEY:-}
+      AWS_ENDPOINT_URL: ${CHECKPOINT_SYNCER_ENDPOINT:-}
+      # localStorage path (used when CHECKPOINT_SYNCER_TYPE=localStorage)
+      HYP_CHECKPOINTSYNCER_PATH: ${LOCAL_SIG_DIR:-/srv/hyperlane-sigs}/${OPERATOR_NAME:-default}/${CHAIN_KEY}
+      HYP_ALLOWLOCALCHECKPOINTSYNCERS: "true"
+      # Private RPC override (optional) — drive.sh reads ${CHAIN_KEY_UPPER}_RPC
+      # from .env and forwards it as CHAIN_RPC_OVERRIDE. Empty = use
+      # chain.yaml URLs.
+      HYP_CHAINS_${CHAIN_KEY_UPPER}_RPCURLS_0_HTTP: ${CHAIN_RPC_OVERRIDE:-}
+    volumes:
+      # Mount the generated agent-config built from every chains/*/chain.yaml.
+      # Path is three levels up: chains/<key>/validator/ → ../../../shared/
+      - ../../../shared/agent-config.json:/config/agent-config.json:ro
+      - ${LOCAL_SIG_DIR:-/srv/hyperlane-sigs}:${LOCAL_SIG_DIR:-/srv/hyperlane-sigs}
+      - validator-db:/data
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+volumes:
+  validator-db:

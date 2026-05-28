@@ -1,0 +1,150 @@
+# Single source of truth for every chain in the bridge.
+#
+# Copy to addresses.yaml and edit. Commit YOUR addresses.yaml to YOUR
+# bridge repo so anyone can verify the bridge against this file. (The
+# upstream kit gitignores addresses.yaml so per-bridge state stays out
+# of the kit history.)
+#
+# verify_bridge_health.mjs reads this and checks each declared address
+# matches what's on-chain. If you change anything here, the next health
+# check will surface the drift.
+
+chains:
+
+  # First chain ("origin" or "home" — names are arbitrary, pick whatever
+  # is convenient). All scripts read chain keys from this file, so the
+  # only place chain names live is here + .env CHAINS_TO_WATCH /
+  # RELAY_CHAINS lists.
+  chain-a:
+    domain: 99001              # Hyperlane domain ID (usually = chainId)
+    chainId: 99001
+    rpcUrls:
+      - https://rpc.chain-a.example.org
+      - https://rpc-fallback.chain-a.example.org
+    blockExplorer: https://scan.chain-a.example.org
+    finality:
+      reorgPeriod: 5           # blocks beyond head before validators sign
+    native:
+      symbol: NATIVE
+      decimals: 18
+
+    # Hyperlane core (deploy once per chain via deployer/deploy_evm_core.mjs).
+    mailbox: "0x0000000000000000000000000000000000000000"
+    merkleTreeHook: "0x0000000000000000000000000000000000000000"
+    validatorAnnounce: "0x0000000000000000000000000000000000000000"
+    # StaticMessageIdMultisigIsmFactory — needed by update_ism.mjs to
+    # deploy new ISMs on this chain when the validator set changes.
+    ismFactory: "0x0000000000000000000000000000000000000000"
+
+    # Optional: some chains (legacy / flat-fee EVMs) reject EIP-1559
+    # typed txs. Setting `legacyGasPrice` here flips deploy scripts to
+    # type:0 legacy txs at this exact gas price. String, to survive
+    # u64 limits (e.g. 18e18).
+    # legacyGasPrice: "20000000000"
+
+    # Per-route ISM (deploy once, reused by all warp routes on this chain).
+    ism: "0x0000000000000000000000000000000000000000"
+    ismValidators:
+      - "0x0000000000000000000000000000000000000001"
+      - "0x0000000000000000000000000000000000000002"
+      - "0x0000000000000000000000000000000000000003"
+      - "0x0000000000000000000000000000000000000004"
+      - "0x0000000000000000000000000000000000000005"
+    ismThreshold: 3
+
+    # Phase 1: `owner: "operator-key"` — admin actions broadcast directly
+    # by promote_operator.sh. Phase 2: switch to a Safe address and the
+    # same command emits Safe-tx JSON instead. See DECENTRALIZATION.md.
+    owner: "operator-key"
+    multisig: "0x0000000000000000000000000000000000000000"
+    multisigOwners:
+      - "0x000000000000000000000000000000000000000A"
+      - "0x000000000000000000000000000000000000000B"
+      - "0x000000000000000000000000000000000000000C"
+      - "0x000000000000000000000000000000000000000D"
+      - "0x000000000000000000000000000000000000000E"
+    multisigThreshold: 3
+
+    # Warp routers — one per bridged token. `kind` is the Hyperlane
+    # router type (HypNative for the chain's native token,
+    # HypERC20Collateral to wrap an existing ERC20, HypERC20 for the
+    # synthetic side, HypXERC20 for EIP-7281 mint/burn rate-limited).
+    routers:
+      NATIVE:
+        kind: HypNative
+        address: "0x0000000000000000000000000000000000000000"
+      USDC:
+        kind: HypERC20Collateral
+        address: "0x0000000000000000000000000000000000000000"
+        underlying: "0x0000000000000000000000000000000000000000"
+
+  # Second chain — receives the synthetic side of each token bridged
+  # from chain-a, plus its own native/ERC20 in the reverse direction.
+  chain-b:
+    domain: 99002
+    chainId: 99002
+    rpcUrls:
+      - https://rpc.chain-b.example.org
+    blockExplorer: https://scan.chain-b.example.org
+    finality:
+      reorgPeriod: 2
+    native:
+      symbol: NATIVE-B
+      decimals: 18
+
+    mailbox: "0x0000000000000000000000000000000000000000"
+    merkleTreeHook: "0x0000000000000000000000000000000000000000"
+    validatorAnnounce: "0x0000000000000000000000000000000000000000"
+    ismFactory: "0x0000000000000000000000000000000000000000"
+
+    ism: "0x0000000000000000000000000000000000000000"
+    ismValidators:
+      - "0x0000000000000000000000000000000000000001"
+      - "0x0000000000000000000000000000000000000002"
+      - "0x0000000000000000000000000000000000000003"
+      - "0x0000000000000000000000000000000000000004"
+      - "0x0000000000000000000000000000000000000005"
+    ismThreshold: 3
+
+    owner: "operator-key"
+    multisig: "0x0000000000000000000000000000000000000000"
+    multisigOwners:
+      - "0x000000000000000000000000000000000000000A"
+      - "0x000000000000000000000000000000000000000B"
+      - "0x000000000000000000000000000000000000000C"
+      - "0x000000000000000000000000000000000000000D"
+      - "0x000000000000000000000000000000000000000E"
+    multisigThreshold: 3
+
+    routers:
+      hNATIVE:
+        kind: HypERC20         # synthetic version of chain-a NATIVE
+        address: "0x0000000000000000000000000000000000000000"
+      hUSDC:
+        kind: HypERC20
+        address: "0x0000000000000000000000000000000000000000"
+
+# Enrollments — record of which routers point at which.
+# For verification only — on-chain is the source of truth.
+enrollments:
+  - source: chain-a:NATIVE
+    dest: chain-b:hNATIVE
+  - source: chain-b:hNATIVE
+    dest: chain-a:NATIVE
+  - source: chain-a:USDC
+    dest: chain-b:hUSDC
+  - source: chain-b:hUSDC
+    dest: chain-a:USDC
+
+# Active relayers — manually curated. Each entry's `signers` map gives
+# the relayer's per-chain hex address (NOT private key). The UI reads
+# this to render the active relayer set; promote_operator.sh add-relayer
+# appends here. Roles: primary (delayMs=0), warm-spare, cold-spare. See
+# runbooks/ADD_RELAYER.md.
+relayers:
+  - operator: example-operator
+    role: primary
+    delayMs: 0
+    signers:
+      chain-a: "0x0000000000000000000000000000000000000000"
+      chain-b: "0x0000000000000000000000000000000000000000"

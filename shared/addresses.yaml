@@ -1,0 +1,82 @@
+# Cross-chain admin state for the bridge.
+#
+# This file holds the LIVE state — current ISM addresses, current
+# validator set per chain, current warp router addresses, relayer
+# roster. Per-chain facts (RPC, mailbox, gas overrides) live in
+# chains/<key>/chain.yaml.
+#
+# Mutated by tools/promote_operator.sh (add-validator, remove-validator,
+# add-relayer, remove-relayer). Verified by recovery/verify_bridge_health.mjs.
+#
+# All addresses here are public on-chain. To verify any value: read
+# the corresponding mailbox.defaultIsm() / router.interchainSecurityModule()
+# on chain.
+
+chains:
+
+  qom:
+    # Active ISM (deployed via the factory in chain.yaml).
+    ism: "0x1cffA244A728a0D639A4F7e5A4E7062B09e1Ddf7"
+    ismValidators:
+      - "0x41843821dAEeAFcf35EA0709208Bc516E2cf9f7A"
+      - "0xAE703563d3ca0bba3b336A88a4d85F0ca1B89c29"
+    ismThreshold: 2
+
+    # Phase 1: operator key. Phase 2+: multisig (transition via
+    # tools/promote_operator.sh auto-detect).
+    owner: "operator-key"
+    multisig: "0x0000000000000000000000000000000000000000"
+
+    routers:
+      # Native QOM router.
+      QOM:
+        kind: HypNative
+        address: "0x692FFba0a57AC06B710e53863758F7e82f19B18e"
+      # Collateral router for ZAP — wraps the ZAP ERC20 for cross-chain bridging.
+      ZAP:
+        kind: HypERC20Collateral
+        address: "0x14e509bC0e5B841C6B44c8E8abf9b9B664eBb32b"
+        underlying: "0x6041B64618434B9D0a9558B5975C5c1DEb45CEE6"
+
+  creative:
+    ism: "0xd4765bea22a0D57c7dE4949BD7Ec87865F6d3Da3"
+    ismValidators:
+      - "0x41843821dAEeAFcf35EA0709208Bc516E2cf9f7A"
+      - "0xAE703563d3ca0bba3b336A88a4d85F0ca1B89c29"
+    ismThreshold: 2
+
+    owner: "operator-key"
+    multisig: "0x0000000000000000000000000000000000000000"
+
+    routers:
+      # Synthetic hQOM — bridged native QOM from the QOM chain.
+      hQOM:
+        kind: HypERC20
+        address: "0x9Fcbc5b9566ae14b83A06f6f25e649ed203a542d"
+      # Synthetic hZAP — bridged ZAP from the QOM chain.
+      hZAP:
+        kind: HypERC20
+        address: "0xb50231f551A8C0a5A9B5ca57C98950BFbaCC6c2c"
+
+# Enrollments — record of which routers point at which.
+# For verification only; on-chain is the source of truth.
+enrollments:
+  - source: qom:QOM
+    dest: creative:hQOM
+  - source: creative:hQOM
+    dest: qom:QOM
+  - source: qom:ZAP
+    dest: creative:hZAP
+  - source: creative:hZAP
+    dest: qom:ZAP
+
+# Active relayers — admin-curated set. New entries are appended by
+# tools/promote_operator.sh add-relayer after the operator is verified.
+# UI reads this to render the active relayer set.
+relayers:
+  - operator: core-team
+    role: primary
+    delayMs: 0
+    signers:
+      qom: "0xBBeFaE8beBd41F461910a5cD0F75607C07a197B0"
+      creative: "0x480E67847a0825AB7CA87b8e1A2eaBBd06B13C96"

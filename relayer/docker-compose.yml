@@ -1,0 +1,75 @@
+# Relayer + stagger sidecar.
+#
+# The relayer agent calls eth_sendRawTransaction via the sidecar, which
+# enforces RELAYER_DELAY_MS + re-checks delivery via eth_call before
+# forwarding the tx to the real RPC. This is what makes a many-relayer
+# pool race-free: if a higher-priority relayer already delivered a
+# message during your delay, the eth_call returns `delivered=true` and
+# the sidecar drops your tx without ever touching the destination RPC.
+#
+# Per-chain config (signer keys, RPC overrides, sidecar routing) is
+# in .env-chains — auto-generated from chains/*/chain.yaml + .env by
+# tools/build_relayer_env.mjs. drive.sh runs the build on every `up`.
+# Don't edit .env-chains directly; edit relayer/.env and chain.yaml.
+
+services:
+  hyperlane-relayer:
+    image: ${HYPERLANE_AGENT_IMAGE:-gcr.io/abacus-labs-dev/hyperlane-agent:main}
+    container_name: bridge-relayer-${OPERATOR_NAME:-default}
+    restart: unless-stopped
+    command: ./relayer
+    depends_on:
+      stagger-sidecar:
+        condition: service_started
+    env_file:
+      # Auto-generated per-chain HYP_CHAINS_<KEY>_* lines (signer key,
+      # sidecar URL, optional RPC override).
+      - .env-chains
+    environment:
+      CONFIG_FILES: /config/agent-config.json
+      HYP_RELAYCHAINS: ${RELAY_CHAINS}
+      HYP_ALLOWLOCALCHECKPOINTSYNCERS: ${HYP_ALLOWLOCALCHECKPOINTSYNCERS:-true}
+      HYP_DB: /data/relayer-db
+      HYP_GASPAYMENTENFORCEMENT: '[{"type":"none"}]'
+
+      # Optional whitelist — only attempt delivery for messages whose
+      # destination router is in this list. Use this when sharing a
+      # Mailbox with another bridge to avoid attempting delivery of
+      # foreign messages. Empty = "all messages".
+      # Format: <chain1>:<router1>,<chain2>:<router2>,...
+      HYP_RELAYER_WHITELIST: ${HYP_RELAYER_WHITELIST:-}
+
+    volumes:
+      - ../shared/agent-config.json:/config/agent-config.json:ro
+      - relayer-db:/data
+      # Read access to localStorage sig dirs from same-host validators.
+      # Harmless when validators use S3/R2 (path may not exist; mount
+      # is read-only). Required when validators publish file:// URLs.
+      - ${LOCAL_SIG_DIR:-/srv/hyperlane-sigs}:${LOCAL_SIG_DIR:-/srv/hyperlane-sigs}:ro
+    networks:
+      - relayer-net
+    logging:
+      driver: json-file
+      options: { max-size: "50m", max-file: "5" }
+
+  stagger-sidecar:
+    build: ./stagger-sidecar
+    container_name: bridge-stagger-${OPERATOR_NAME:-default}
+    restart: unless-stopped
+    environment:
+      RELAYER_DELAY_MS: ${RELAYER_DELAY_MS:-15000}
+      AGENT_CONFIG: /config/agent-config.json
+    volumes:
+      - ../shared/agent-config.json:/config/agent-config.json:ro
+    networks:
+      - relayer-net
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "3" }
+
+volumes:
+  relayer-db: {}
+
+networks:
+  relayer-net:
+    driver: bridge

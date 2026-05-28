@@ -1,0 +1,52 @@
+{
+  "_comment": "Source of truth for Hyperlane agent chain config. Validators + relayers mount this read-only. Copy to agent-config.json and fill in your bridge's chains + addresses. Both source and destination chains must be listed — the validator agent watches origins, the relayer agent submits to destinations.",
+
+  "chains": {
+
+    "chain-a": {
+      "_comment": "Replace `chain-a` with your origin chain key (lowercase, no spaces). The same key is used in validator/relayer .env and docker-compose profiles.",
+      "name": "chain-a",
+      "chainId": 99001,
+      "domainId": 99001,
+      "protocol": "ethereum",
+      "rpcUrls": [
+        { "http": "https://rpc.chain-a.example.org" }
+      ],
+      "mailbox": "0x0000000000000000000000000000000000000000",
+      "merkleTreeHook": "0x0000000000000000000000000000000000000000",
+      "interchainGasPaymaster": "0x0000000000000000000000000000000000000000",
+      "validatorAnnounce": "0x0000000000000000000000000000000000000000",
+      "index": {
+        "_comment": "from: block at/just-before the mailbox deploy. chunk: eth_getLogs window — drop to 100 if your RPC truncates large windows.",
+        "from": 1,
+        "chunk": 2000
+      },
+      "reorgPeriod": 5,
+      "transactionOverrides": {
+        "_comment": "Set ONLY if the chain has a legacy/flat-fee gas model that the agent's EIP-1559 default rejects. String to survive u64 limits (e.g. some L1s pin gas at 1e19+). Delete this block on standard EIP-1559 chains.",
+        "gasPrice": "20000000000"
+      }
+    },
+
+    "chain-b": {
+      "name": "chain-b",
+      "chainId": 99002,
+      "domainId": 99002,
+      "protocol": "ethereum",
+      "rpcUrls": [
+        { "http": "https://rpc.chain-b.example.org" }
+      ],
+      "mailbox": "0x0000000000000000000000000000000000000000",
+      "merkleTreeHook": "0x0000000000000000000000000000000000000000",
+      "interchainGasPaymaster": "0x0000000000000000000000000000000000000000",
+      "validatorAnnounce": "0x0000000000000000000000000000000000000000",
+      "index": {
+        "from": 1,
+        "chunk": 2000
+      },
+      "reorgPeriod": 5
+    }
+
+  },
+  "defaultRpcConsensusType": "fallback"
+}
