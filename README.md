@@ -29,6 +29,13 @@ The kit ships:
 
 ## Run a validator
 
+**New here?** → Follow [**`chains/README.md`**](./chains/README.md). It walks
+you from a fresh Ubuntu server through Docker install, key generation,
+sig-bucket setup, and "your validator is running and signing." Takes
+~30 minutes.
+
+**Already have Docker + kit cloned?** TL;DR:
+
 ```bash
 cd chains/<your-chain>/validator
 cp .env.example .env
@@ -37,8 +44,7 @@ bash 01_setup.sh             # generates VALIDATOR_KEY
 ./drive.sh up -d
 ```
 
-Done. Your validator is signing for that chain with the preset RPCs.
-Repeat the steps for every chain you want to support.
+Repeat for every chain you want to support.
 
 ## Run a relayer
 
