@@ -170,6 +170,15 @@ address.
 
 ## Step 6 (both paths) — Register the chain in `chains/<key>/`
 
+> **If Hyperlane core is already deployed** on the new chain (e.g.,
+> someone else ran it before the kit existed, or another bridge
+> already uses the same Mailbox), skip Steps A.1 / B.2 and start
+> here — Step 6 just registers a chain.yaml preset against
+> already-on-chain addresses. Read `mailbox`, `merkleTreeHook`,
+> `validatorAnnounce`, and `ismFactory` off chain (block explorer
+> or `cast call Mailbox.merkleTreeHook()` etc.) and paste them
+> below.
+
 Copy the template and fill in real values:
 
 ```bash
