@@ -44,7 +44,8 @@ if (!ISM || !routers || routers.length === 0) {
 const desc = process.env.DESCRIPTION ||
   `Update interchainSecurityModule to ${ISM} on ${routers.length} router(s) — automated by promote_operator.sh`;
 
-const iface = new ethers.utils.Interface([
+// ethers v6 namespace (v5 used ethers.utils.{Interface,id,keccak256,defaultAbiCoder,BigNumber}).
+const iface = new ethers.Interface([
   'function setInterchainSecurityModule(address)',
 ]);
 const calldata = iface.encodeFunctionData('setInterchainSecurityModule', [ISM]);
@@ -53,12 +54,13 @@ const calldatas = routers.map(() => calldata);
 const values = routers.map(() => '0');
 
 // Governor `hashProposal` = keccak256(abi.encode(targets, values, calldatas, descriptionHash))
-const descHash = ethers.utils.id(desc);  // keccak256 of description
-const proposalIdBytes = ethers.utils.keccak256(ethers.utils.defaultAbiCoder.encode(
+const descHash = ethers.id(desc);  // keccak256 of description
+const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+const proposalIdBytes = ethers.keccak256(abiCoder.encode(
   ['address[]', 'uint256[]', 'bytes[]', 'bytes32'],
   [routers, values.map(v => v), calldatas, descHash],
 ));
-const proposalId = ethers.BigNumber.from(proposalIdBytes).toString();
+const proposalId = BigInt(proposalIdBytes).toString();
 
 const out = {
   targets: routers,

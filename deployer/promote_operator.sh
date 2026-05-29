@@ -275,30 +275,38 @@ case "$CMD" in
           sync_yaml_with_history
         fi
 
-        # Now emit a Safe-tx per router per chain.
-        node -e '
-          const fs=require("fs"); const yaml=require("yaml");
+        # Now emit a Safe-tx per router per chain. Inline node runs from
+        # tools/ so the `yaml` module resolves. rpcUrls + chainId live in
+        # chains/<k>/chain.yaml (not addresses.yaml) — we read them from there.
+        (cd "$KIT_ROOT/tools" && node -e '
+          const fs=require("fs"); const yaml=require("yaml"); const path=require("path");
+          const kitRoot=process.argv[2];
           const d=yaml.parseDocument(fs.readFileSync(process.argv[1],"utf8"));
           const chains=d.get("chains");
           for (const item of chains.items) {
             const ck=item.key.value; const c=item.value;
-            const ism=c.get("ism"); const rpcUrls=c.get("rpcUrls");
-            const rpc=rpcUrls?.items?.[0]?.value;
-            const chainId=Number(c.get("chainId"));
+            const ism=c.get("ism");
             const routers=c.get("routers");
-            if (!ism || !rpc || !routers?.items) continue;
+            if (!ism || !routers?.items) continue;
             const safe=c.get("multisig");
             if (!safe || safe==="0x0000000000000000000000000000000000000000") {
               console.error(`[promote] WARN: chain ${ck} has no multisig in addresses.yaml — skipping`);
               continue;
             }
+            const presetPath = path.join(kitRoot, "chains", ck, "chain.yaml");
+            if (!fs.existsSync(presetPath)) {
+              console.error(`[promote] WARN: chains/${ck}/chain.yaml missing — skipping`);
+              continue;
+            }
+            const preset = yaml.parse(fs.readFileSync(presetPath,"utf8"));
+            const chainId = Number(preset.chainId);
             for (const r of routers.items) {
               const sym=r.key.value;
               const addr=r.value.get("address");
               console.log(`${ck}/${sym}|${addr}|${ism}|${safe}|${chainId}`);
             }
           }
-        ' "$KIT_ROOT/shared/addresses.yaml" | while IFS='|' read -r label router ism safe cid; do
+        ' "$KIT_ROOT/shared/addresses.yaml" "$KIT_ROOT") | while IFS='|' read -r label router ism safe cid; do
           out="$KIT_ROOT/deployer/artifacts/safe-tx-${STAMP}-${label//\//-}.json"
           ROUTER="$router" ISM="$ism" SAFE="$safe" CHAIN_ID="$cid" \
             node "$SAFE_TX" > "$out"
@@ -328,7 +336,8 @@ case "$CMD" in
         fi
 
         # One proposal per chain (each chain has its own Governor / Timelock).
-        node -e '
+        # Inline node runs from tools/ so the `yaml` module resolves.
+        (cd "$KIT_ROOT/tools" && node -e '
           const fs=require("fs"); const yaml=require("yaml");
           const d=yaml.parseDocument(fs.readFileSync(process.argv[1],"utf8"));
           const chains=d.get("chains");
@@ -341,7 +350,7 @@ case "$CMD" in
             if (addrs.length===0) continue;
             console.log(`${ck}|${addrs.join(",")}|${ism}`);
           }
-        ' "$KIT_ROOT/shared/addresses.yaml" | while IFS='|' read -r ck routers ism; do
+        ' "$KIT_ROOT/shared/addresses.yaml") | while IFS='|' read -r ck routers ism; do
           out="$KIT_ROOT/deployer/artifacts/proposal-${STAMP}-${ck}.json"
           ROUTERS="$routers" ISM="$ism" \
             DESCRIPTION="Update ISM to $ism on ${ck} routers — promote-operator $STAMP" \

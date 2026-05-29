@@ -21,7 +21,8 @@ if (!RPC || !ROUTER) {
   process.exit(2);
 }
 
-const p = new ethers.providers.JsonRpcProvider(RPC);
+// ethers v6 namespace (v5 used ethers.providers.JsonRpcProvider).
+const p = new ethers.JsonRpcProvider(RPC);
 
 const OWNABLE_ABI = ['function owner() view returns (address)'];
 const SAFE_ABI    = ['function getOwners() view returns (address[])'];

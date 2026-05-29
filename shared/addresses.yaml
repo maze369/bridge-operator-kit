@@ -111,3 +111,10 @@ relayers:
     signers:
       qom: "0xBBeFaE8beBd41F461910a5cD0F75607C07a197B0"
       creative: "0x480E67847a0825AB7CA87b8e1A2eaBBd06B13C96"
+  - operator: operator3
+    role: warm-spare
+    delayMs: 15000
+    signers:
+      qom: "0x962752525788F80B648384648F426b95c4A36e1b"
+      creative: "0x30E717cF54b84308e0575687aA3b8A4902b44d04"
+      testnet: "0xb5e63e75dfB756E1f64de77C0FA33D12d23d8007"

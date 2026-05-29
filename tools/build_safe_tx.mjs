@@ -32,7 +32,8 @@ if (!ROUTER || !ISM || !SAFE || !CHAIN_ID) {
   process.exit(2);
 }
 
-const iface = new ethers.utils.Interface([
+// ethers v6 namespace (v5 used ethers.utils.Interface).
+const iface = new ethers.Interface([
   'function setInterchainSecurityModule(address)',
 ]);
 const data = iface.encodeFunctionData('setInterchainSecurityModule', [ISM]);
