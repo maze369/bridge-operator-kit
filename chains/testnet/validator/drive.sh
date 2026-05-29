@@ -94,17 +94,23 @@ elif [ -f "$KIT_ROOT/tools/build_agent_config.mjs" ]; then
         if command -v node &>/dev/null && command -v npm &>/dev/null; then
             (cd "$KIT_ROOT/tools" && npm install --silent)
         else
+            # Run as the calling UID so node_modules isn't root-owned (would
+            # break the next host-side npm run + writeable bind-mount perms).
             docker run --rm \
               -v "$KIT_ROOT":/work -w /work/tools \
+              --user "$(id -u):$(id -g)" \
               node:20-bookworm-slim npm install --silent
         fi
     fi
     if command -v node &>/dev/null; then
         node "$KIT_ROOT/tools/build_agent_config.mjs"
     else
-        # No host node? Run inside a one-shot container.
+        # No host node? Run inside a one-shot container, as the calling UID
+        # so the written shared/agent-config.json doesn't become root-owned
+        # and unwritable on the next run.
         docker run --rm \
           -v "$KIT_ROOT":/work -w /work \
+          --user "$(id -u):$(id -g)" \
           node:20-bookworm-slim node tools/build_agent_config.mjs
     fi
 fi

@@ -26,27 +26,32 @@ if [ -n "${VALIDATOR_KEY:-}" ] && [ "${VALIDATOR_KEY}" != "" ]; then
 fi
 
 # Pick a node runner: host or docker.
-NODE_RUN=""
+#
+# NODE_PREFIX is the command run BEFORE `node ...`. Empty when host node is
+# used; the docker invocation (which ends in the image name) when not. So
+# subsequent invocations are `$NODE_PREFIX node ...`.
+NODE_PREFIX=""
+USE_HOST=0
 if command -v node &>/dev/null; then
   if [ ! -d node_modules/ethers ]; then
     npm install ethers --no-save --silent >/dev/null 2>&1 || true
   fi
   if [ -d node_modules/ethers ]; then
-    NODE_RUN="node"
+    USE_HOST=1
   fi
 fi
-if [ -z "$NODE_RUN" ]; then
+if [ "$USE_HOST" != "1" ]; then
   if ! command -v docker &>/dev/null; then
     echo "ERROR: need either host node + ethers, or docker."
     exit 4
   fi
-  NODE_RUN="docker run --rm -v $PWD:/work -w /work node:20-bookworm-slim"
+  NODE_PREFIX="docker run --rm -v $PWD:/work -w /work --user $(id -u):$(id -g) node:20-bookworm-slim"
   if [ ! -d node_modules/ethers ]; then
-    $NODE_RUN bash -c "npm install ethers --no-save --silent >/dev/null 2>&1"
+    $NODE_PREFIX bash -c "npm install ethers --no-save --silent >/dev/null 2>&1"
   fi
 fi
 
-out=$($NODE_RUN node -e '
+out=$($NODE_PREFIX node -e '
 const { Wallet } = require("ethers");
 const w = Wallet.createRandom();
 console.log(w.privateKey + ":" + w.address);

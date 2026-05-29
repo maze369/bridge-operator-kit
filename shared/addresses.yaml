@@ -19,7 +19,9 @@ chains:
     ism: "0x6fb288fcb9c76c742e9905fd4f57c8f500f5933e"
     ismValidators:
       - "0x41843821dAEeAFcf35EA0709208Bc516E2cf9f7A"
-    ismThreshold: 1
+      - "0x5ab759103e6e9a4e61ed8a8faf5b004dd63d30c5"
+      - "0x42eb8da49bc4e0f2c8ba31d973a7db79feb1a0eb"
+    ismThreshold: 2
 
     # Phase 1: operator key. Phase 2+: multisig (transition via
     # tools/promote_operator.sh auto-detect).
@@ -41,7 +43,8 @@ chains:
     ism: "0xc403abEa7319CBa4C25f850Cd223FbE134853310"
     ismValidators:
       - "0x41843821dAEeAFcf35EA0709208Bc516E2cf9f7A"
-    ismThreshold: 1
+      - "0x5ab759103e6e9a4e61ed8a8faf5b004dd63d30c5"
+    ismThreshold: 2
 
     owner: "operator-key"
     multisig: "0x0000000000000000000000000000000000000000"
@@ -63,7 +66,7 @@ chains:
         kind: HypERC20
         address: "0x5f1dA19dc3Ab034e3921E4Eea575fC32A686f73c"
   testnet:
-    ism: "0x0000000000000000000000000000000000000000"
+    ism: "0xa748D726541B15C952041A8f59fD4a54F7Bf58ba"
     ismValidators:
       - "0x41843821dAEeAFcf35EA0709208Bc516E2cf9f7A"
     ismThreshold: 1

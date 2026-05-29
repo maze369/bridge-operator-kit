@@ -23,17 +23,27 @@ KIT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # AND the per-chain signer/RPC env from relayer/.env. drive.sh runs
 # both on every `up` so adding a chain is just: drop a chain.yaml,
 # add SIGNER_KEY_<KEY> to .env, drive.sh restart.
-NODE_CMD=""
-if command -v node &>/dev/null; then
-    NODE_CMD="node"
-else
-    NODE_CMD="docker run --rm -v $KIT_ROOT:/work -w /work node:20-bookworm-slim node"
-fi
+#
+# Prefers host node; falls back to a one-shot docker container. The
+# docker fallback uses the kit-relative path (/work/...) — NOT the host
+# path — and runs as the calling UID so written files (agent-config.json,
+# .env-chains) don't end up root-owned and unwritable on the next host run.
+run_node_script() {
+    local SCRIPT_REL="$1"   # relative to KIT_ROOT, e.g. tools/build_agent_config.mjs
+    if command -v node >/dev/null 2>&1; then
+        node "$KIT_ROOT/$SCRIPT_REL"
+    else
+        docker run --rm \
+            -v "$KIT_ROOT":/work -w /work \
+            --user "$(id -u):$(id -g)" \
+            node:20-bookworm-slim node "/work/$SCRIPT_REL"
+    fi
+}
 if [ -f "$KIT_ROOT/tools/build_agent_config.mjs" ]; then
-    $NODE_CMD "$KIT_ROOT/tools/build_agent_config.mjs"
+    run_node_script "tools/build_agent_config.mjs"
 fi
 if [ -f "$KIT_ROOT/tools/build_relayer_env.mjs" ]; then
-    $NODE_CMD "$KIT_ROOT/tools/build_relayer_env.mjs"
+    run_node_script "tools/build_relayer_env.mjs"
 fi
 
 # Detect compose flavor
