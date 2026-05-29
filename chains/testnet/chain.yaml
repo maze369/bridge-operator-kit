@@ -21,7 +21,7 @@ finality:
   reorgPeriod: 5
 
 native:
-  symbol: tdrop
+  symbol: test42
   decimals: 18
 
 hyperlane:

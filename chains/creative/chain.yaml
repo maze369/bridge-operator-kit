@@ -21,7 +21,7 @@ finality:
   reorgPeriod: 5
 
 native:
-  symbol: cdrop
+  symbol: crea42
   decimals: 18
 
 hyperlane:
