@@ -44,6 +44,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument, parse as parseYaml, Scalar } from 'yaml';
+import { getAddress } from 'ethers';
+
+// EIP-55 checksum-normalize any 0x...40hex address before it gets written
+// to addresses.yaml. Without this, an operator can paste a mixed-case
+// address copied from a tooling output whose checksum differs from EIP-55
+// (we hit this 2026-05-29 — gen_state passed the bad address through to
+// state.json, the UI's `new ethers.Contract(addr)` threw "bad checksum",
+// and a silent catch{} in the balance widget hid the failure so balances
+// just showed zero and bridge clicks reverted). All inputs are normalized.
+function cs(a) {
+  if (typeof a !== 'string') return a;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(a)) return a;
+  try { return getAddress(a.toLowerCase()); } catch { return a; }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADDR_YAML = path.resolve(__dirname, '..', 'shared', 'addresses.yaml');
@@ -65,6 +79,7 @@ function save(doc) {
 function lc(s) { return (s || '').toString().toLowerCase(); }
 
 function addValidator(addr) {
+  const norm = cs(addr);
   const doc = load();
   const chains = doc.get('chains');
   if (!chains) throw new Error('addresses.yaml has no `chains` block');
@@ -75,9 +90,8 @@ function addValidator(addr) {
     let list = chCfg.get('ismValidators');
     if (!list) continue;  // skip chains without an ismValidators block
     const cur = list.items.map(x => lc(x.value));
-    if (!cur.includes(lc(addr))) {
-      // pass the string directly; yaml.YAMLSeq creates the proper scalar node.
-      list.add(addr);
+    if (!cur.includes(lc(norm))) {
+      list.add(norm);
       changed.push(chainKey);
     }
   }
@@ -107,7 +121,7 @@ function setIsm(chain, ism) {
   const doc = load();
   const chCfg = doc.getIn(['chains', chain]);
   if (!chCfg) throw new Error(`chain ${chain} not in addresses.yaml`);
-  chCfg.set('ism', ism);
+  chCfg.set('ism', cs(ism));
   save(doc);
 }
 
@@ -143,7 +157,7 @@ function addRelayer(name, role, delayMs, signersStr) {
   for (const pair of signersStr.split(',')) {
     const [k, v] = pair.split('=').map(s => s.trim());
     if (!k || !v) throw new Error(`bad signer pair "${pair}"`);
-    signers[k] = v;
+    signers[k] = cs(v);
   }
   relayers.add({
     operator: name,
@@ -232,15 +246,16 @@ function addRouter(chainKey, symbol, kind, address, underlying) {
     chCfg.set('routers', {});
     routers = chCfg.get('routers');
   }
+  const addrCs = cs(address);
   if (routers.has(symbol)) {
     const existing = routers.getIn([symbol, 'address']);
-    if (lc(existing) === lc(address)) {
+    if (lc(existing) === lc(addrCs)) {
       return { changed: false, reason: 'router already registered with this address' };
     }
     throw new Error(`router ${chainKey}.${symbol} already registered with a different address (${existing}); not overwriting`);
   }
-  const entry = { kind, address };
-  if (underlying) entry.underlying = underlying;
+  const entry = { kind, address: addrCs };
+  if (underlying) entry.underlying = cs(underlying);
   routers.set(symbol, entry);
   save(doc);
   return { changed: true };

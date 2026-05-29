@@ -40,7 +40,7 @@ chains:
         underlying: "0x6041B64618434B9D0a9558B5975C5c1DEb45CEE6"
 
   creative:
-    ism: "0xc403abEa7319CBa4C25f850Cd223FbE134853310"
+    ism: "0xC403aBeA7319cbA4C25f850Cd223FBe134853310"
     ismValidators:
       - "0x41843821dAEeAFcf35EA0709208Bc516E2cf9f7A"
       - "0x5ab759103e6e9a4e61ed8a8faf5b004dd63d30c5"
@@ -61,7 +61,7 @@ chains:
       hTEST:
         kind: HypXERC20
         address: "0x974248dbbe61af475a120bf826e0564119323c80"
-        underlying: "0x22fb195bc6d06CEF89758d75b43A92C4e953fd40"
+        underlying: "0x22Fb195bc6d06CEF89758d75b43A92C4e953fd40"
       hTEST42:
         kind: HypERC20
         address: "0x5f1dA19dc3Ab034e3921E4Eea575fC32A686f73c"

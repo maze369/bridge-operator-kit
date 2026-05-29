@@ -17,6 +17,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
+import { getAddress } from 'ethers';
+
+// EIP-55 checksum every 0x...40hex address in the output. ethers v6 (and most
+// modern frontends) reject mixed-case addresses whose checksum is wrong, with
+// a silent catch swallowing the error in many UIs — symptom: a balance widget
+// reads 0 and the next bridge click reverts with "bad address checksum".
+// Normalising here means addresses.yaml can hold any case and the UI always
+// gets correct checksums.
+function cs(a) {
+  if (typeof a !== 'string') return a;
+  if (!/^0x[0-9a-fA-F]{40}$/.test(a)) return a;
+  try { return getAddress(a.toLowerCase()); }
+  catch { return a; }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const KIT_ROOT = path.resolve(__dirname, '..');
@@ -65,13 +79,13 @@ function uiChain(key, preset, state) {
     walletRpcUrls: preset.walletRpcUrls || preset.rpcUrls || [],
     scan: preset.blockExplorer || '',
     color: colorFor(key, preset),
-    mailbox: preset.hyperlane?.mailbox || '',
-    validatorAnnounce: preset.hyperlane?.validatorAnnounce || '',
+    mailbox: cs(preset.hyperlane?.mailbox || ''),
+    validatorAnnounce: cs(preset.hyperlane?.validatorAnnounce || ''),
     native: preset.native || { symbol: key.toUpperCase(), decimals: 18 },
     legacyGasPrice: preset.transactionOverrides?.gasPrice || null,
     // Cross-chain live state (current ISM, validator set, threshold).
-    ism: state?.ism || '',
-    ismValidators: state?.ismValidators || [],
+    ism: cs(state?.ism || ''),
+    ismValidators: (state?.ismValidators || []).map(cs),
     ismThreshold: Number(state?.ismThreshold ?? 0),
     owner: state?.owner || 'operator-key',
   };
@@ -83,12 +97,12 @@ function uiToken(presets, states, srcChain, srcSymbol, dstChain, dstSymbol) {
   if (!srcRouter || !dstRouter) return null;
   const srcKind = KIND_TO_UI[srcRouter.kind] || 'unknown';
   const dstKind = KIND_TO_UI[dstRouter.kind] || 'unknown';
-  const src = { kind: srcKind, router: srcRouter.address, symbol: srcSymbol };
-  const dst = { kind: dstKind, router: dstRouter.address, symbol: dstSymbol };
-  if (srcKind === 'collateral' && srcRouter.underlying) src.erc20 = srcRouter.underlying;
-  if (dstKind === 'collateral' && dstRouter.underlying) dst.erc20 = dstRouter.underlying;
-  if (srcKind === 'xerc20' && srcRouter.underlying) src.erc20 = srcRouter.underlying;
-  if (dstKind === 'xerc20' && dstRouter.underlying) dst.erc20 = dstRouter.underlying;
+  const src = { kind: srcKind, router: cs(srcRouter.address), symbol: srcSymbol };
+  const dst = { kind: dstKind, router: cs(dstRouter.address), symbol: dstSymbol };
+  if (srcKind === 'collateral' && srcRouter.underlying) src.erc20 = cs(srcRouter.underlying);
+  if (dstKind === 'collateral' && dstRouter.underlying) dst.erc20 = cs(dstRouter.underlying);
+  if (srcKind === 'xerc20' && srcRouter.underlying) src.erc20 = cs(srcRouter.underlying);
+  if (dstKind === 'xerc20' && dstRouter.underlying) dst.erc20 = cs(dstRouter.underlying);
   // Token display name — strip leading "h" from synthetic to recover the underlying symbol
   // (h-prefix is this kit's convention for HypERC20 synthetics).
   const baseSymbol = srcSymbol.startsWith('h')
@@ -151,7 +165,7 @@ function build() {
     operator: r.operator,
     role: r.role || 'unspecified',
     delayMs: Number(r.delayMs ?? 0),
-    signers: r.signers || {},
+    signers: Object.fromEntries(Object.entries(r.signers || {}).map(([k, v]) => [k, cs(v)])),
   }));
 
   return {
