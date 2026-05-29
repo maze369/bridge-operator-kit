@@ -21,38 +21,7 @@
 
 import { ethers } from 'ethers';
 import * as core from '@hyperlane-xyz/core';
-import fs from 'fs';
-import path from 'path';
-
-// Hand-parse the bits we need (no yaml dep in the runner).
-function readYamlChains(yamlPath) {
-  const raw = fs.readFileSync(yamlPath, 'utf8');
-  const expanded = raw.replace(/\$\{([A-Z0-9_]+)\}/g, (_, n) => process.env[n] || `__MISSING_${n}__`);
-  const chains = {};
-  const lines = expanded.split('\n');
-  let current = null;
-  for (let i = 0; i < lines.length; i++) {
-    const L = lines[i];
-    if (L.match(/^chains:\s*$/)) continue;
-    const head = L.match(/^  ([a-z0-9_-]+):\s*$/);
-    if (head) { current = head[1]; chains[current] = {}; continue; }
-    if (!current) continue;
-    if (L.match(/^[a-z]/i)) { current = null; continue; }
-    const kv = L.match(/^    ([a-zA-Z_]+):\s*(.+)$/);
-    if (kv) {
-      let v = kv[2].trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
-      chains[current][kv[1]] = v;
-    }
-    if (L.match(/^    rpcUrls:\s*$/)) {
-      chains[current].rpcUrls = [];
-      while (lines[i + 1]?.match(/^      - /)) {
-        i++;
-        chains[current].rpcUrls.push(lines[i].replace(/^      - /, '').trim());
-      }
-    }
-  }
-  return chains;
-}
+import { readChainConfig } from '/work/tools/read_chain_config.mjs';
 
 const PK = process.env.HYP_KEY;
 const SRC_CHAIN = process.env.SRC_CHAIN;
@@ -66,20 +35,16 @@ for (const [k, v] of Object.entries({ SRC_CHAIN, SRC_ROUTER, DST_CHAIN, DST_ROUT
   if (!v) { console.error(`FATAL ${k} missing`); process.exit(2); }
 }
 
-const ADDR_YAML = '/work/shared/addresses.yaml';
-const chains = readYamlChains(ADDR_YAML);
-const src = chains[SRC_CHAIN];
-const dst = chains[DST_CHAIN];
-if (!src) { console.error(`FATAL ${SRC_CHAIN} not in addresses.yaml`); process.exit(3); }
-if (!dst) { console.error(`FATAL ${DST_CHAIN} not in addresses.yaml`); process.exit(3); }
+const src = readChainConfig(SRC_CHAIN);
+const dst = readChainConfig(DST_CHAIN);
 
-const SRC_DOMAIN = parseInt(src.domain, 10);
-if (!DST_DOMAIN) DST_DOMAIN = parseInt(dst.domain, 10);
+const SRC_DOMAIN = src.domain;
+if (!DST_DOMAIN) DST_DOMAIN = dst.domain;
 
 const srcRpc = src.rpcUrls?.[0];
 const dstRpc = dst.rpcUrls?.[0];
-if (!srcRpc || srcRpc.startsWith('__MISSING_')) { console.error(`FATAL ${SRC_CHAIN} RPC missing`); process.exit(3); }
-if (!dstRpc || dstRpc.startsWith('__MISSING_')) { console.error(`FATAL ${DST_CHAIN} RPC missing`); process.exit(3); }
+if (!srcRpc || srcRpc.startsWith('__MISSING_')) { console.error(`FATAL ${SRC_CHAIN} RPC missing — fix chains/${SRC_CHAIN}/chain.yaml`); process.exit(3); }
+if (!dstRpc || dstRpc.startsWith('__MISSING_')) { console.error(`FATAL ${DST_CHAIN} RPC missing — fix chains/${DST_CHAIN}/chain.yaml`); process.exit(3); }
 
 const srcProv = new ethers.providers.JsonRpcProvider(srcRpc);
 const dstProv = new ethers.providers.JsonRpcProvider(dstRpc);

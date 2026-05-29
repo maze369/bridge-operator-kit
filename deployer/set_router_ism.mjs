@@ -16,34 +16,7 @@
 
 import { ethers } from 'ethers';
 import * as core from '@hyperlane-xyz/core';
-import fs from 'fs';
-
-function readYamlChain(yamlPath, chainKey) {
-  const raw = fs.readFileSync(yamlPath, 'utf8');
-  const expanded = raw.replace(/\$\{([A-Z0-9_]+)\}/g, (_, n) => process.env[n] || `__MISSING_${n}__`);
-  const lines = expanded.split('\n');
-  let inChain = false, ch = {};
-  for (let i = 0; i < lines.length; i++) {
-    const L = lines[i];
-    const m = L.match(/^  ([a-z0-9_-]+):\s*$/);
-    if (m) { inChain = (m[1] === chainKey); continue; }
-    if (!inChain) continue;
-    if (L.match(/^[a-z]/i)) break;
-    const kv = L.match(/^    ([a-zA-Z_]+):\s*(.+)$/);
-    if (kv) {
-      let v = kv[2].trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
-      ch[kv[1]] = v;
-    }
-    if (L.match(/^    rpcUrls:\s*$/)) {
-      ch.rpcUrls = [];
-      while (lines[i + 1]?.match(/^      - /)) {
-        i++;
-        ch.rpcUrls.push(lines[i].replace(/^      - /, '').trim());
-      }
-    }
-  }
-  return ch;
-}
+import { readChainConfig } from '/work/tools/read_chain_config.mjs';
 
 const PK = process.env.HYP_KEY;
 const CHAIN = process.env.CHAIN;
@@ -55,10 +28,10 @@ if (!CHAIN)  { console.error('FATAL CHAIN missing'); process.exit(2); }
 if (!ROUTER) { console.error('FATAL ROUTER missing'); process.exit(2); }
 if (!ISM)    { console.error('FATAL ISM missing'); process.exit(2); }
 
-const ch = readYamlChain('/work/shared/addresses.yaml', CHAIN);
+const ch = readChainConfig(CHAIN);
 const rpc = ch.rpcUrls?.[0];
 if (!rpc || rpc.startsWith('__MISSING_')) {
-  console.error(`FATAL chain "${CHAIN}" RPC unavailable`); process.exit(3);
+  console.error(`FATAL chain "${CHAIN}" RPC unavailable — fix chains/${CHAIN}/chain.yaml`); process.exit(3);
 }
 
 const provider = new ethers.providers.JsonRpcProvider(rpc);
@@ -79,16 +52,21 @@ async function buildOverrides(gasLimit) {
 (async () => {
   const ov = await buildOverrides(800000);
 
-  const R = new ethers.Contract(ROUTER, core.HypERC20__factory.abi, signer);
+  // Normalize to valid checksum — addresses.yaml / env may pass mixed-case
+  // addresses that ethers v5 strict mode would reject.
+  const routerCs = ethers.utils.getAddress(ROUTER.toLowerCase());
+  const ismCs = ethers.utils.getAddress(ISM.toLowerCase());
+
+  const R = new ethers.Contract(routerCs, core.HypERC20__factory.abi, signer);
   const cur = await R.interchainSecurityModule();
-  L('chain', CHAIN, 'router', ROUTER);
+  L('chain', CHAIN, 'router', routerCs);
   L('current ISM:', cur);
-  L('target ISM: ', ISM);
-  if (cur.toLowerCase() === ISM.toLowerCase()) {
+  L('target ISM: ', ismCs);
+  if (cur.toLowerCase() === ismCs.toLowerCase()) {
     L('ALREADY set — no-op');
     return;
   }
-  const tx = await R.setInterchainSecurityModule(ISM, ov);
+  const tx = await R.setInterchainSecurityModule(ismCs, ov);
   L('tx', tx.hash);
   await tx.wait();
   L('DONE');

@@ -171,10 +171,19 @@ Idempotent — if an enrollment is already correct, the script logs
 
 ## Step 5 — Wire a router-specific ISM (optional)
 
-By default, routers use the chain's default ISM (set during `ADD_CHAIN`).
-Skip this step unless you want a token-specific ISM — e.g., higher
-threshold for a high-value asset, or a lower one for an experimental
-low-stakes token.
+`deploy_warp_router.mjs` leaves the new router's ISM unset
+(`address(0)`). That falls back to the chain's default ISM (the one
+listed under `chains.<key>.ism` in `shared/addresses.yaml`). For 99%
+of assets that's correct — operator changes via
+`promote_operator.sh add-validator | remove-validator` automatically
+swap every yaml-registered router to the chain's current ISM, so the
+new asset inherits validator-set updates for free.
+
+**Only set a router-specific ISM when you need different security per
+asset** — e.g. a higher threshold for a high-value asset, or a lower
+threshold for an experimental low-stakes token. Once set, the
+router stops following the chain default and only swaps when you
+explicitly point it elsewhere.
 
 ```bash
 DEPLOYER_KEY_FILE=/path/to/admin.key \
@@ -184,28 +193,49 @@ ISM=0x<ism-address> \
 bash deployer/_run_deploy.sh set_router_ism.mjs
 ```
 
-For most assets, skip — the default ISM is fine.
+> **Drift caution:** routers with custom ISMs are *not* iterated by
+> `promote_operator.sh remove-validator` (the chain default's
+> ismValidators changes don't touch them). If you later retire a
+> validator, you must rotate each router-specific ISM yourself, or
+> the router will keep trusting the retired validator's signatures
+> and stop delivering. This is exactly the failure mode that motivated
+> `promote_operator.sh sync` — see `ADD_VALIDATOR.md`.
 
 ---
 
-## Step 6 — Update `shared/addresses.yaml`
+## Step 6 — Register in `shared/addresses.yaml`
 
-Append the new routers under each chain's `routers:` section, per the
-schema documented at the top of this runbook. Add the cross-enrollment
-records under the top-level `enrollments:` block:
+`deploy_warp_router.mjs` **auto-registers** the new router by calling
+`yaml_promote.mjs add-router` after a successful deploy. Verify with:
 
-```yaml
-enrollments:
-  # ... existing ...
-  - source: <source-chain>:<source-symbol>
-    dest: <destination-chain>:<destination-symbol>
-  - source: <destination-chain>:<destination-symbol>
-    dest: <source-chain>:<source-symbol>
+```bash
+node tools/yaml_promote.mjs show | jq '.chains | to_entries[] | {chain: .key, routers: .value.routers}'
 ```
 
-`enrollments` is for verification — `verify_bridge_health.mjs` checks
-the on-chain enrollments match this list. On-chain is the source of
-truth; this list is just for human review.
+If auto-register was skipped (`SKIP_YAML_REGISTER=1`), run it manually:
+
+```bash
+node tools/yaml_promote.mjs add-router \
+  <chain-key> <symbol> <HypNative|HypERC20|HypERC20Collateral|HypXERC20> \
+  <router-address> [underlying-address]
+```
+
+Then record the cross-enrollments (verification-only — on-chain is
+the source of truth, this list is for human review and
+`verify_bridge_health.mjs`):
+
+```bash
+node tools/yaml_promote.mjs add-enrollment <src-chain>:<src-sym> <dst-chain>:<dst-sym>
+node tools/yaml_promote.mjs add-enrollment <dst-chain>:<dst-sym> <src-chain>:<src-sym>
+```
+
+**Why this matters:** the routers in `addresses.yaml` are the set that
+`promote_operator.sh add-validator | remove-validator | sync` iterates
+when swapping ISMs. A router that's deployed on-chain but missing from
+the yaml will be invisible to admin operations — when a validator
+later rotates, its ISM won't swap, and the router will silently keep
+trusting the retired validator's signatures. (See `promote_operator.sh
+sync` in `ADD_VALIDATOR.md` for drift recovery.)
 
 Commit + push.
 

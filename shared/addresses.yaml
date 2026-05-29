@@ -16,11 +16,10 @@ chains:
 
   qom:
     # Active ISM (deployed via the factory in chain.yaml).
-    ism: "0x1cffA244A728a0D639A4F7e5A4E7062B09e1Ddf7"
+    ism: "0x6fb288fcb9c76c742e9905fd4f57c8f500f5933e"
     ismValidators:
       - "0x41843821dAEeAFcf35EA0709208Bc516E2cf9f7A"
-      - "0xAE703563d3ca0bba3b336A88a4d85F0ca1B89c29"
-    ismThreshold: 2
+    ismThreshold: 1
 
     # Phase 1: operator key. Phase 2+: multisig (transition via
     # tools/promote_operator.sh auto-detect).
@@ -39,11 +38,10 @@ chains:
         underlying: "0x6041B64618434B9D0a9558B5975C5c1DEb45CEE6"
 
   creative:
-    ism: "0xd4765bea22a0D57c7dE4949BD7Ec87865F6d3Da3"
+    ism: "0xc403abEa7319CBa4C25f850Cd223FbE134853310"
     ismValidators:
       - "0x41843821dAEeAFcf35EA0709208Bc516E2cf9f7A"
-      - "0xAE703563d3ca0bba3b336A88a4d85F0ca1B89c29"
-    ismThreshold: 2
+    ismThreshold: 1
 
     owner: "operator-key"
     multisig: "0x0000000000000000000000000000000000000000"
@@ -57,6 +55,28 @@ chains:
       hZAP:
         kind: HypERC20
         address: "0xb50231f551A8C0a5A9B5ca57C98950BFbaCC6c2c"
+      hTEST:
+        kind: HypXERC20
+        address: "0x974248dbbe61af475a120bf826e0564119323c80"
+        underlying: "0x22fb195bc6d06CEF89758d75b43A92C4e953fd40"
+      hTEST42:
+        kind: HypERC20
+        address: "0x5f1dA19dc3Ab034e3921E4Eea575fC32A686f73c"
+  testnet:
+    ism: "0x0000000000000000000000000000000000000000"
+    ismValidators:
+      - "0x41843821dAEeAFcf35EA0709208Bc516E2cf9f7A"
+    ismThreshold: 1
+    owner: operator-key
+    multisig: "0x0000000000000000000000000000000000000000"
+    routers:
+      TEST:
+        kind: HypXERC20
+        address: "0x654a2bc43c1d4f5a67e7ba7f4cfa342588475989"
+        underlying: "0xde7c65f0165b2308acc63c5cfe608649990b0387"
+      test42:
+        kind: HypNative
+        address: "0x0847e0F953c8EEc54Eb661cd859EB8bEE94Be93E"
 
 # Enrollments — record of which routers point at which.
 # For verification only; on-chain is the source of truth.
@@ -69,6 +89,14 @@ enrollments:
     dest: creative:hZAP
   - source: creative:hZAP
     dest: qom:ZAP
+  - source: testnet:TEST
+    dest: creative:hTEST
+  - source: creative:hTEST
+    dest: testnet:TEST
+  - source: testnet:test42
+    dest: creative:hTEST42
+  - source: creative:hTEST42
+    dest: testnet:test42
 
 # Active relayers — admin-curated set. New entries are appended by
 # tools/promote_operator.sh add-relayer after the operator is verified.

@@ -54,12 +54,19 @@ for ev in $(env | grep -oE '^DEPLOYER_KEY_[A-Z0-9]+=' | sed 's/=$//'); do
   echo "[runner]   per-chain key for ${chain} (pk len ${#ck})"
 done
 
-# Pass through any HYP_* env vars (HYP_RPC, HYP_VALIDATOR, VALIDATORS,
-# THRESHOLD, SKIP_ROUTER_SWAP, etc) — these are the standard interface
-# every deploy_*.mjs script reads. Also passes through any caller-set
-# overrides without us having to hard-list them.
+# Pass through env vars that the deploy_*.mjs scripts read. Covers:
+#   - HYP_* — Hyperlane agent conventions
+#   - VALIDATORS / THRESHOLD / SKIP_ROUTER_SWAP / CHAIN_FILTER /
+#     FORCE_REDEPLOY_ISM — update_ism.mjs args
+#   - SRC_CHAIN / DST_CHAIN / SRC_ROUTER / DST_ROUTER / DST_DOMAIN /
+#     ROUTER_KIND / UNDERLYING / SYMBOL / NAME / DECIMALS — deploy_warp_router,
+#     enroll_pair, set_router_ism args
+#   - CHAIN / ROUTER / ISM — set_router_ism args
+#   - SKIP_YAML_REGISTER — bypass deploy_warp_router auto-register
+#   - NEW_CHAIN / LOCAL_DOMAIN / RPC — deploy_evm_core.mjs args
 HYP_PASSTHROUGH=()
-for ev in $(env | grep -oE '^(HYP_[A-Z0-9_]+|VALIDATORS|THRESHOLD|SKIP_ROUTER_SWAP|CHAIN_FILTER|ENROLLMENTS)=' | sed 's/=$//'); do
+ALLOW_PATTERN='^(HYP_[A-Z0-9_]+|VALIDATORS|THRESHOLD|SKIP_ROUTER_SWAP|CHAIN_FILTER|FORCE_REDEPLOY_ISM|SRC_CHAIN|DST_CHAIN|SRC_ROUTER|DST_ROUTER|DST_DOMAIN|ROUTER_KIND|UNDERLYING|SYMBOL|NAME|DECIMALS|CHAIN|ROUTER|ISM|SKIP_YAML_REGISTER|NEW_CHAIN|LOCAL_DOMAIN|RPC)='
+for ev in $(env | grep -oE "$ALLOW_PATTERN" | sed 's/=$//'); do
   [ "$ev" = "HYP_KEY" ] && continue   # already set above
   HYP_PASSTHROUGH+=( -e "${ev}=${!ev}" )
 done

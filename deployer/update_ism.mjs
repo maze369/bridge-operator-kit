@@ -1,26 +1,26 @@
 // Deploy a new MessageIdMultisigISM via the factory with the given
-// validators + threshold, then swap it into every warp router on both
-// chains. Idempotent — a router already pointing at this ISM is skipped.
+// validators + threshold, then swap it into every warp router on every
+// registered chain. Idempotent — a router already pointing at this ISM
+// is skipped; an ISM whose CREATE2 address already has bytecode is reused.
 //
 // Args via env:
-//   VALIDATORS = comma-separated 0x addrs (factory sorts internally)
-//   THRESHOLD  = integer (≤ N validators)
+//   VALIDATORS = comma-separated 0x addrs (factory sorts internally).
+//                If unset, taken from addresses.yaml (union across chains).
+//   THRESHOLD  = integer (≤ N validators). If unset, taken from the first
+//                chain's ismThreshold in addresses.yaml.
 //
-// Reads chain + router addresses from /work/shared/addresses.yaml. Each
-// chain's section must include:
-//   rpcUrls: [...]
-//   ismFactory: 0x... (StaticMessageIdMultisigIsmFactory)
-//   routers: { <symbol>: { kind, address } }
+// Chain configuration is merged from chains/<key>/chain.yaml (static facts:
+// rpcUrls, ismFactory, mailbox, ...) + shared/addresses.yaml (live state:
+// routers, ismValidators, ...). See tools/read_chain_config.mjs.
 //
 // Appends every (validators, threshold, deployed ISMs) tuple to
 // /work/deployer/ism_history.json for audit.
 import { ethers } from 'ethers';
 import * as core from '@hyperlane-xyz/core';
 import fs from 'fs';
+import { readAllChains } from '/work/tools/read_chain_config.mjs';
 
 const PK = process.env.HYP_KEY;
-const VALIDATORS = (process.env.VALIDATORS || '').split(',').map(s => s.trim()).filter(Boolean);
-const THRESHOLD = parseInt(process.env.THRESHOLD || '0', 10);
 
 // Per-chain owner key override: when routers on different chains are
 // owned by different keys (defensive blast-radius pattern), set
@@ -30,82 +30,37 @@ function keyForChain(chainKey) {
   return process.env[envKey] || PK;
 }
 
-if (!PK || VALIDATORS.length === 0 || THRESHOLD === 0) {
-  console.error('FATAL need HYP_KEY + VALIDATORS + THRESHOLD'); process.exit(2);
+if (!PK) { console.error('FATAL need HYP_KEY'); process.exit(2); }
+
+const chains = readAllChains();
+
+// Resolve VALIDATORS + THRESHOLD: caller-provided env wins; otherwise
+// derive from addresses.yaml (union of validators, first chain's threshold).
+let VALIDATORS = (process.env.VALIDATORS || '').split(',').map(s => s.trim()).filter(Boolean);
+let THRESHOLD = parseInt(process.env.THRESHOLD || '0', 10);
+if (VALIDATORS.length === 0) {
+  // Dedup by lowercase but emit checksummed addresses — ethers v5 is strict
+  // about checksums in factory.getAddress() / setInterchainSecurityModule.
+  const seen = new Set();
+  for (const c of Object.values(chains)) {
+    for (const v of (c.ismValidators || [])) {
+      const lc = v.toLowerCase();
+      if (seen.has(lc)) continue;
+      seen.add(lc);
+      VALIDATORS.push(ethers.utils.getAddress(v));
+    }
+  }
+}
+if (THRESHOLD === 0) {
+  THRESHOLD = Object.values(chains).find(c => c.ismThreshold)?.ismThreshold || 0;
+}
+if (VALIDATORS.length === 0 || THRESHOLD === 0) {
+  console.error('FATAL need VALIDATORS + THRESHOLD (env or addresses.yaml)'); process.exit(2);
 }
 if (THRESHOLD > VALIDATORS.length) {
   console.error(`FATAL: threshold ${THRESHOLD} > N validators ${VALIDATORS.length}`); process.exit(2);
 }
 
-// Hand-parse the bits we need from addresses.yaml (no yaml dep in the
-// runner). Same approach the other deployer scripts use.
-function readChains(yamlPath) {
-  const raw = fs.readFileSync(yamlPath, 'utf8');
-  const expanded = raw.replace(/\$\{([A-Z0-9_]+)\}/g, (_, n) => process.env[n] || `__MISSING_${n}__`);
-  const chains = {};
-  const lines = expanded.split('\n');
-  let current = null;
-  let inRouters = false;
-  let currentRouter = null;
-  for (let i = 0; i < lines.length; i++) {
-    const L = lines[i];
-    if (L.match(/^chains:\s*$/)) continue;
-
-    const head = L.match(/^  ([a-z0-9_-]+):\s*$/);
-    if (head) {
-      current = head[1];
-      chains[current] = { routers: {} };
-      inRouters = false;
-      currentRouter = null;
-      continue;
-    }
-    if (!current) continue;
-    if (L.match(/^[a-z]/i)) { current = null; inRouters = false; continue; }
-
-    // routers: block header (bare key, no value)
-    if (L.match(/^    routers:\s*$/)) { inRouters = true; continue; }
-
-    // Scalar kv at chain level.
-    const kv = L.match(/^    ([a-zA-Z_]+):\s*(.+)$/);
-    if (kv) {
-      const key = kv[1];
-      let v = kv[2].trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
-      chains[current][key] = v;
-      inRouters = false;
-      continue;
-    }
-
-    // rpcUrls list at chain level.
-    if (L.match(/^    rpcUrls:\s*$/)) {
-      chains[current].rpcUrls = [];
-      while (lines[i + 1]?.match(/^      - /)) {
-        i++;
-        chains[current].rpcUrls.push(lines[i].replace(/^      - /, '').trim());
-      }
-      continue;
-    }
-
-    // Routers block.
-    if (inRouters) {
-      const rh = L.match(/^      ([A-Za-z0-9_]+):\s*$/);
-      if (rh) {
-        currentRouter = rh[1];
-        chains[current].routers[currentRouter] = {};
-        continue;
-      }
-      const rkv = L.match(/^        ([a-zA-Z_]+):\s*(.+)$/);
-      if (rkv && currentRouter) {
-        let v = rkv[2].trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
-        chains[current].routers[currentRouter][rkv[1]] = v;
-        continue;
-      }
-    }
-  }
-  return chains;
-}
-
-const ADDR_YAML = '/work/shared/addresses.yaml';
-const chains = readChains(ADDR_YAML);
 const HIST = '/work/deployer/ism_history.json';
 
 const L = (...a) => console.log('[ism]', ...a);
@@ -123,40 +78,71 @@ async function ovr(p, ch, gas = 5000000) {
   return { maxFeePerGas: gp, maxPriorityFeePerGas: gp, gasLimit: gas, type: 2 };
 }
 
-async function deployIsmOn(chainKey, ch) {
-  L(`=== deploy ISM on ${chainKey} ===`);
-  if (!ch.ismFactory) throw new Error(`${chainKey}: ismFactory missing in addresses.yaml`);
+// Resolve the target ISM for this chain.
+//
+// Priority:
+//   1. If addresses.yaml.chains.<k>.ism is set (non-zero, has bytecode),
+//      treat it as the canonical target. This is the working live ISM —
+//      possibly deployed via a factory different from chain.yaml's
+//      ismFactory (e.g., a MerkleRoot variant, or a legacy deployer's
+//      factory). Don't second-guess working state.
+//   2. Otherwise, deploy a fresh ISM via the chain.yaml ismFactory using
+//      CREATE2(VALIDATORS, THRESHOLD), and update addresses.yaml.ism via
+//      ism_history.json afterward.
+//
+// FORCE_REDEPLOY_ISM=1 — bypass (1) and always deploy a fresh CREATE2 ISM.
+// Use this when you actually want to rotate validator sets, not just sync.
+async function resolveIsmForChain(chainKey, ch) {
   const rpc = ch.rpcUrls?.[0];
   if (!rpc || rpc.startsWith('__MISSING_')) throw new Error(`${chainKey}: no usable RPC (got "${rpc}")`);
-
   const p = new ethers.providers.JsonRpcProvider(rpc);
+
+  // Normalize the declared ISM to a valid checksummed address (ethers v5
+  // strict mode rejects mixed-case-with-wrong-checksum; addresses.yaml
+  // values come from on-chain probes and may not be checksummed).
+  const rawIsm = ch.ism;
+  const isPlaceholder = !rawIsm
+    || rawIsm === '0x0000000000000000000000000000000000000000'
+    || /^__MISSING_/.test(rawIsm);
+  const declaredIsm = isPlaceholder ? null : ethers.utils.getAddress(rawIsm.toLowerCase());
+  const forceRedeploy = process.env.FORCE_REDEPLOY_ISM === '1';
+
+  if (!isPlaceholder && !forceRedeploy) {
+    const code = await p.getCode(declaredIsm);
+    if (code.length <= 2) {
+      throw new Error(
+        `${chainKey}: addresses.yaml lists ism=${declaredIsm} but no bytecode at that address. ` +
+        `Fix the yaml or set FORCE_REDEPLOY_ISM=1 to deploy a fresh one.`
+      );
+    }
+    L(`${chainKey} target ISM (from addresses.yaml): ${declaredIsm}`);
+    return { ism: declaredIsm, deployed: false };
+  }
+
+  // Deploy a new ISM.
+  L(`=== deploy ISM on ${chainKey} ===`);
+  if (!ch.ismFactory) throw new Error(`${chainKey}: ismFactory missing in chains/${chainKey}/chain.yaml`);
   const s = new ethers.Wallet(keyForChain(chainKey), p);
-  const fac = new ethers.Contract(ch.ismFactory, core.StaticMessageIdMultisigIsmFactory__factory.abi, s);
-  // CREATE2 address derived from (validators, threshold) — same tuple = same instance.
+  const fac = new ethers.Contract(ethers.utils.getAddress(ch.ismFactory.toLowerCase()), core.StaticMessageIdMultisigIsmFactory__factory.abi, s);
   const predicted = await fac.getAddress(VALIDATORS, THRESHOLD);
   const code = await p.getCode(predicted);
   if (code.length > 2) {
-    L(`${chainKey} ISM already exists at ${predicted}`);
-    return predicted;
+    L(`${chainKey} ISM already at predicted ${predicted}`);
+    return { ism: predicted, deployed: true };
   }
-  // Factory.deploy is ~300-500k gas (small MetaProxy). 800k cap keeps
-  // flat-fee chains (those with a large constant gas price set via
-  // `legacyGasPrice:` in addresses.yaml) from being billed for a 5M
-  // limit on a 300k-gas tx. EIP-1559 chains charge only gas_used, so
-  // over-provisioning is harmless there.
   const ov = await ovr(p, ch, 800_000);
   const tx = await fac.deploy(VALIDATORS, THRESHOLD, ov);
   L(`${chainKey} deploy tx ${tx.hash}`);
   await tx.wait();
   L(`${chainKey} new ISM ${predicted}`);
-  return predicted;
+  return { ism: predicted, deployed: true };
 }
 
 async function swapIsmInRouter(chainKey, ch, routerLabel, routerAddr, newIsm) {
   const rpc = ch.rpcUrls?.[0];
   const p = new ethers.providers.JsonRpcProvider(rpc);
   const s = new ethers.Wallet(keyForChain(chainKey), p);
-  const R = new ethers.Contract(routerAddr, core.HypERC20__factory.abi, s);
+  const R = new ethers.Contract(ethers.utils.getAddress(routerAddr.toLowerCase()), core.HypERC20__factory.abi, s);
   const current = await R.interchainSecurityModule();
   if (current.toLowerCase() === newIsm.toLowerCase()) {
     L(`${chainKey} ${routerLabel} already using ISM ${newIsm.slice(0, 10)}..`);
@@ -180,9 +166,12 @@ async function swapIsmInRouter(chainKey, ch, routerLabel, routerAddr, newIsm) {
   const filter = (process.env.CHAIN_FILTER || '').split(',').map(s => s.trim()).filter(Boolean);
   const chainKeys = Object.keys(chains).filter(k => filter.length === 0 || filter.includes(k));
   if (filter.length) L(`CHAIN_FILTER restricts to: ${chainKeys.join(', ')}`);
-  const deployedIsms = {};
+  const deployedIsms = {};   // chain -> resolved ISM address (may pre-exist)
+  const freshlyDeployed = {}; // chain -> true if THIS run deployed it
   for (const k of chainKeys) {
-    deployedIsms[k] = await deployIsmOn(k, chains[k]);
+    const r = await resolveIsmForChain(k, chains[k]);
+    deployedIsms[k] = r.ism;
+    freshlyDeployed[k] = r.deployed;
   }
 
   // SKIP_ROUTER_SWAP=1 — used by Phase 2/3 callers (promote_operator.sh)
@@ -203,14 +192,25 @@ async function swapIsmInRouter(chainKey, ch, routerLabel, routerAddr, newIsm) {
 
   let h = [];
   if (fs.existsSync(HIST)) { try { h = JSON.parse(fs.readFileSync(HIST)); } catch {} }
-  h.push({
-    ts: new Date().toISOString(),
-    validators: VALIDATORS,
-    threshold: THRESHOLD,
-    deployedIsms,
-  });
-  fs.writeFileSync(HIST, JSON.stringify(h, null, 2));
+  // Only write history for chains where we deployed a fresh ISM (i.e.,
+  // resolved via CREATE2). Pre-existing ISMs taken from addresses.yaml
+  // don't need a yaml writeback — they're already canonical there.
+  const newlyDeployed = Object.fromEntries(
+    Object.entries(deployedIsms).filter(([k]) => freshlyDeployed[k])
+  );
+  if (Object.keys(newlyDeployed).length) {
+    h.push({
+      ts: new Date().toISOString(),
+      validators: VALIDATORS,
+      threshold: THRESHOLD,
+      deployedIsms: newlyDeployed,
+    });
+    fs.writeFileSync(HIST, JSON.stringify(h, null, 2));
+  }
 
-  L('DONE — new ISM in effect:');
-  for (const k of chainKeys) L(`  ${k}: ${deployedIsms[k]}`);
+  L('DONE — target ISM per chain:');
+  for (const k of chainKeys) {
+    const tag = freshlyDeployed[k] ? '(fresh deploy)' : '(from yaml)';
+    L(`  ${k}: ${deployedIsms[k]} ${tag}`);
+  }
 })().catch(e => { console.error('ERR', e?.error?.message || e?.reason || e?.message || e); process.exit(1); });

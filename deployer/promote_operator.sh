@@ -31,9 +31,18 @@
 #   bash promote_operator.sh remove-relayer <name>
 #       Removes by name. NO on-chain action.
 #
+#   bash promote_operator.sh sync
+#       Reconciles on-chain ISMs to what addresses.yaml says. Re-runs
+#       update_ism.mjs with the current validator set + threshold from
+#       addresses.yaml. Idempotent: ISMs are CREATE2-deterministic so
+#       already-deployed ones are reused, and routers already pointing at
+#       the right ISM are skipped. Run after registering a previously-
+#       unknown router (e.g. legacy drift recovery) or any time you suspect
+#       on-chain state has diverged from yaml.
+#
 #   bash promote_operator.sh sync-state
 #       Just regenerates state.json from current addresses.yaml + pushes.
-#       Useful after manual yaml edits.
+#       Useful after manual yaml edits with no on-chain implications.
 #
 # Env (inherited by _run_deploy.sh when broadcasting):
 #   DEPLOYER_KEY / DEPLOYER_KEY_FILE — Phase 1 admin PK
@@ -407,6 +416,19 @@ case "$CMD" in
     echo "[promote] DONE — remove-relayer $NAME"
     ;;
 
+  sync)
+    # Reconcile on-chain ISMs to addresses.yaml's current state.
+    # update_ism.mjs (with no env overrides) reads VALIDATORS + THRESHOLD
+    # from addresses.yaml, deploys the deterministic ISM per chain (no-op
+    # if already deployed), and swaps any router whose ISM diverges. Then
+    # writes back the (re-)confirmed ISM addresses and refreshes state.json.
+    echo "[promote] sync — reconciling on-chain ISMs to addresses.yaml"
+    bash "$KIT_ROOT/deployer/_run_deploy.sh" update_ism.mjs
+    sync_yaml_with_history
+    sync_state
+    echo "[promote] DONE — sync"
+    ;;
+
   sync-state)
     sync_state
     ;;
@@ -422,7 +444,8 @@ case "$CMD" in
   bash promote_operator.sh remove-validator <addr> [--mode ...]
   bash promote_operator.sh add-relayer <name> <role> <delay_ms> \"chain=0x...,chain=0x...\"
   bash promote_operator.sh remove-relayer <name>
-  bash promote_operator.sh sync-state
+  bash promote_operator.sh sync          # reconcile on-chain ISMs to addresses.yaml
+  bash promote_operator.sh sync-state    # regen state.json only (no on-chain)
   bash promote_operator.sh show"
     exit 2
     ;;

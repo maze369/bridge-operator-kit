@@ -204,6 +204,36 @@ Fill in:
 
 Commit + push the new `chains/<new-key>/` directory.
 
+### Step 6.5 — Register the chain in `shared/addresses.yaml`
+
+Adding the preset under `chains/` makes the chain known to validators
+and the UI's `gen_state.mjs`. To also make it visible to the admin
+flow (`promote_operator.sh add-validator | remove-validator | sync`)
+and `recovery/verify_bridge_health.mjs`, register it in
+`addresses.yaml`:
+
+```bash
+node tools/yaml_promote.mjs add-chain <new-key>
+```
+
+By default this copies the validator set + threshold from the first
+existing chain block, so the new chain inherits the current bridge-
+wide signer set. Override with flags when you genuinely want a
+different set on this chain:
+
+```bash
+node tools/yaml_promote.mjs add-chain <new-key> \
+  --validators 0xv1,0xv2 --threshold 2
+```
+
+`ism` stays `0x0` until the first `promote_operator.sh sync` (or
+`add-validator` / `remove-validator`) deploys the chain's
+`StaticMessageIdMultisigIsm` via the factory in `chain.yaml` and
+writes the address back.
+
+Routers come later — `deploy_warp_router.mjs` auto-registers each
+under `chains.<key>.routers` (see `ADD_TOKEN.md`).
+
 ---
 
 ## Step 7 — Every operator: pull + extend

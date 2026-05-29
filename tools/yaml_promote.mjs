@@ -19,6 +19,17 @@
 //   set-threshold <threshold>
 //       Updates `ismThreshold` on every chain.
 //
+//   add-chain <key> [--threshold N] [--validators 0x..,0x..]
+//       Registers a new chain block. Defaults: threshold = first chain's
+//       ismThreshold (or 1); validators = union of existing chains'
+//       ismValidators. Static facts (rpcUrls, mailbox, ...) come from
+//       chains/<key>/chain.yaml — register that preset first.
+//
+//   add-router <chain> <symbol> <kind> <address> [underlying]
+//       Registers a warp router under chains.<chain>.routers.<symbol>.
+//       `kind` is one of HypNative | HypERC20 | HypERC20Collateral | HypXERC20.
+//       `underlying` is required for Collateral and xERC20.
+//
 //   add-relayer <name> <role> <delayMs> <chain1=addr1,chain2=addr2,...>
 //       Appends a new entry to the top-level `relayers:` list.
 //
@@ -32,7 +43,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseDocument, Scalar } from 'yaml';
+import { parseDocument, parse as parseYaml, Scalar } from 'yaml';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADDR_YAML = path.resolve(__dirname, '..', 'shared', 'addresses.yaml');
@@ -44,9 +55,10 @@ function load() {
 }
 function save(doc) {
   fs.writeFileSync(ADDR_YAML, doc.toString({
-    lineWidth: 0,        // preserve long single-line strings
-    nullStr: '',         // empty string for null
+    lineWidth: 0,                // preserve long single-line strings
+    nullStr: '',                 // empty string for null
     blockQuote: 'literal',
+    collectionStyle: 'block',    // never inline flow {...} / [...] for new entries
   }));
 }
 
@@ -154,6 +166,105 @@ function removeRelayer(name) {
   return { changed: true };
 }
 
+function addChain(chainKey, opts = {}) {
+  // Verify the chain.yaml preset exists before allowing registration.
+  const presetPath = path.resolve(__dirname, '..', 'chains', chainKey, 'chain.yaml');
+  if (!fs.existsSync(presetPath)) {
+    throw new Error(`chains/${chainKey}/chain.yaml not found — register the chain preset first (see ADD_CHAIN.md)`);
+  }
+
+  const doc = load();
+  let chains = doc.get('chains');
+  if (!chains) {
+    doc.set('chains', {});
+    chains = doc.get('chains');
+  }
+  if (chains.has(chainKey)) {
+    return { changed: false, reason: 'chain already registered' };
+  }
+
+  // Default threshold from first existing chain or 1.
+  let threshold = opts.threshold;
+  if (!threshold) {
+    threshold = chains.items?.[0]?.value?.get('ismThreshold') || 1;
+  }
+
+  // Default validators: union of existing chains.
+  let validators = opts.validators || [];
+  if (validators.length === 0 && chains.items?.length) {
+    const set = new Set();
+    for (const it of chains.items) {
+      const list = it.value.get('ismValidators');
+      if (list?.items) for (const x of list.items) set.add(x.value);
+    }
+    validators = [...set];
+  }
+
+  chains.set(chainKey, {
+    // ism gets filled in when update_ism.mjs (or `promote_operator.sh sync`)
+    // runs and writes back the deployed CREATE2 address via set-ism.
+    ism: '0x0000000000000000000000000000000000000000',
+    ismValidators: validators,
+    ismThreshold: threshold,
+    owner: 'operator-key',
+    multisig: '0x0000000000000000000000000000000000000000',
+    routers: {},
+  });
+  save(doc);
+  return { changed: true, validators, threshold };
+}
+
+function addRouter(chainKey, symbol, kind, address, underlying) {
+  const VALID_KINDS = ['HypNative', 'HypERC20', 'HypERC20Collateral', 'HypXERC20'];
+  if (!VALID_KINDS.includes(kind)) {
+    throw new Error(`unknown router kind "${kind}" — must be one of ${VALID_KINDS.join(', ')}`);
+  }
+  if ((kind === 'HypERC20Collateral' || kind === 'HypXERC20') && !underlying) {
+    throw new Error(`router kind ${kind} requires <underlying> (the ERC20 / xERC20 address)`);
+  }
+
+  const doc = load();
+  const chCfg = doc.getIn(['chains', chainKey]);
+  if (!chCfg) throw new Error(`chain ${chainKey} not in addresses.yaml — run add-chain first`);
+
+  let routers = chCfg.get('routers');
+  if (!routers || !routers.items) {
+    chCfg.set('routers', {});
+    routers = chCfg.get('routers');
+  }
+  if (routers.has(symbol)) {
+    const existing = routers.getIn([symbol, 'address']);
+    if (lc(existing) === lc(address)) {
+      return { changed: false, reason: 'router already registered with this address' };
+    }
+    throw new Error(`router ${chainKey}.${symbol} already registered with a different address (${existing}); not overwriting`);
+  }
+  const entry = { kind, address };
+  if (underlying) entry.underlying = underlying;
+  routers.set(symbol, entry);
+  save(doc);
+  return { changed: true };
+}
+
+function addEnrollment(srcChain, srcSymbol, dstChain, dstSymbol) {
+  const doc = load();
+  let enrollments = doc.get('enrollments');
+  if (!enrollments) {
+    doc.set('enrollments', []);
+    enrollments = doc.get('enrollments');
+  }
+  const src = `${srcChain}:${srcSymbol}`;
+  const dst = `${dstChain}:${dstSymbol}`;
+  for (const it of enrollments.items || []) {
+    if (it.get('source') === src && it.get('dest') === dst) {
+      return { changed: false, reason: 'enrollment already recorded' };
+    }
+  }
+  enrollments.add({ source: src, dest: dst });
+  save(doc);
+  return { changed: true };
+}
+
 function show() {
   const doc = load();
   const chains = doc.get('chains');
@@ -200,6 +311,39 @@ try {
       console.log(JSON.stringify({ ok: true }));
       break;
     }
+    case 'add-chain': {
+      const [chainKey, ...flags] = rest;
+      if (!chainKey) throw new Error('add-chain requires <key>');
+      const opts = {};
+      for (let i = 0; i < flags.length; i++) {
+        if (flags[i] === '--threshold') { opts.threshold = parseInt(flags[++i], 10); }
+        else if (flags[i] === '--validators') {
+          opts.validators = flags[++i].split(',').map(s => s.trim()).filter(Boolean);
+        }
+      }
+      const res = addChain(chainKey, opts);
+      console.log(JSON.stringify(res));
+      break;
+    }
+    case 'add-router': {
+      const [chainKey, sym, kind, addr, underlying] = rest;
+      if (!chainKey || !sym || !kind || !addr) {
+        throw new Error('add-router <chain> <symbol> <kind> <address> [underlying]');
+      }
+      const res = addRouter(chainKey, sym, kind, addr, underlying);
+      console.log(JSON.stringify(res));
+      break;
+    }
+    case 'add-enrollment': {
+      const [src, dst] = rest;
+      if (!src || !dst) throw new Error('add-enrollment <src-chain>:<symbol> <dst-chain>:<symbol>');
+      const [sc, ssym] = src.split(':');
+      const [dc, dsym] = dst.split(':');
+      if (!sc || !ssym || !dc || !dsym) throw new Error('expected <chain>:<symbol> on both sides');
+      const res = addEnrollment(sc, ssym, dc, dsym);
+      console.log(JSON.stringify(res));
+      break;
+    }
     case 'set-threshold': {
       const changed = setThreshold(rest[0]);
       console.log(JSON.stringify({ changed }));
@@ -225,6 +369,9 @@ try {
   yaml_promote.mjs remove-validator <addr>
   yaml_promote.mjs set-ism <chain> <addr>
   yaml_promote.mjs set-threshold <n>
+  yaml_promote.mjs add-chain <key> [--threshold N] [--validators 0x..,0x..]
+  yaml_promote.mjs add-router <chain> <symbol> <kind> <address> [underlying]
+  yaml_promote.mjs add-enrollment <src-chain>:<symbol> <dst-chain>:<symbol>
   yaml_promote.mjs add-relayer <name> <role> <delayMs> "chain=addr,..."
   yaml_promote.mjs remove-relayer <name>
   yaml_promote.mjs show`);

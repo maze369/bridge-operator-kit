@@ -36,42 +36,10 @@ import { ethers } from 'ethers';
 import * as core from '@hyperlane-xyz/core';
 import fs from 'fs';
 import path from 'path';
-
-// Tiny yaml reader (avoids extra dep at runtime; only needs basic structure).
-function readYamlChain(yamlPath, chainKey) {
-  const raw = fs.readFileSync(yamlPath, 'utf8');
-  const expanded = raw.replace(/\$\{([A-Z0-9_]+)\}/g, (_, n) => process.env[n] || `__MISSING_${n}__`);
-  // We can't import 'yaml' (not in the runner's npm install). Hand-parse
-  // the bits we need from a known schema. If schema drifts this will break;
-  // that's a useful canary.
-  const lines = expanded.split('\n');
-  let inChain = false, depth = 0, ch = {};
-  for (let i = 0; i < lines.length; i++) {
-    const L = lines[i];
-    const m = L.match(/^  ([a-z0-9_-]+):\s*$/);
-    if (m) { inChain = (m[1] === chainKey); depth = inChain ? 4 : 0; continue; }
-    if (!inChain) continue;
-    if (L.match(/^[a-z]/i)) break; // exited the chains block
-    const kv = L.match(/^    ([a-zA-Z_]+):\s*(.+)$/);
-    if (kv) {
-      const k = kv[1];
-      let v = kv[2].trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
-      ch[k] = v;
-    }
-    const arr = L.match(/^    rpcUrls:\s*$/);
-    if (arr) {
-      ch.rpcUrls = [];
-      while (lines[i + 1]?.match(/^      - /)) {
-        i++;
-        ch.rpcUrls.push(lines[i].replace(/^      - /, '').trim());
-      }
-    }
-  }
-  return ch;
-}
+import { execFileSync } from 'node:child_process';
+import { readChainConfig } from '/work/tools/read_chain_config.mjs';
 
 const KIT_ROOT = '/work';
-const ADDR_YAML = path.join(KIT_ROOT, 'shared/addresses.yaml');
 const PK = process.env.HYP_KEY;
 const CHAIN = process.env.SRC_CHAIN || process.env.DST_CHAIN;
 const KIND = process.env.ROUTER_KIND;
@@ -80,24 +48,32 @@ const SYMBOL = process.env.SYMBOL || '';
 const NAME = process.env.NAME || (SYMBOL ? `Hyperlane ${SYMBOL.replace(/^h/, '')}` : '');
 const DECIMALS = parseInt(process.env.DECIMALS || '18', 10);
 
+// Auto-register the deployed router in addresses.yaml unless explicitly
+// suppressed (SKIP_YAML_REGISTER=1). Default: register. This is what makes
+// the bridge admin tools "see" the new router for ISM swaps + state.json.
+const REGISTER_IN_YAML = process.env.SKIP_YAML_REGISTER !== '1';
+
 if (!PK) { console.error('FATAL HYP_KEY missing'); process.exit(2); }
 if (!CHAIN) { console.error('FATAL SRC_CHAIN or DST_CHAIN must be set'); process.exit(2); }
-if (!KIND) { console.error('FATAL ROUTER_KIND missing (HypNative|HypERC20Collateral|HypERC20)'); process.exit(2); }
+if (!KIND) { console.error('FATAL ROUTER_KIND missing (HypNative|HypERC20Collateral|HypERC20|HypXERC20)'); process.exit(2); }
 if (KIND === 'HypERC20Collateral' && !UNDERLYING) {
   console.error('FATAL HypERC20Collateral requires UNDERLYING=<erc20 address>'); process.exit(2);
+}
+if (KIND === 'HypXERC20' && !UNDERLYING) {
+  console.error('FATAL HypXERC20 requires UNDERLYING=<xerc20 address>'); process.exit(2);
 }
 if (KIND === 'HypERC20' && !SYMBOL) {
   console.error('FATAL HypERC20 requires SYMBOL=<token symbol> (NAME + DECIMALS optional)'); process.exit(2);
 }
 
-const chCfg = readYamlChain(ADDR_YAML, CHAIN);
+const chCfg = readChainConfig(CHAIN);
 if (!chCfg.mailbox) {
-  console.error(`FATAL chain "${CHAIN}" has no mailbox in addresses.yaml — run ADD_CHAIN first`);
+  console.error(`FATAL chain "${CHAIN}" has no mailbox — register chains/${CHAIN}/chain.yaml first (see ADD_CHAIN.md)`);
   process.exit(3);
 }
 const RPC = chCfg.rpcUrls?.[0];
 if (!RPC || RPC.startsWith('__MISSING_')) {
-  console.error(`FATAL chain "${CHAIN}" has no usable RPC (got "${RPC}"). Set the env var or fix addresses.yaml.`);
+  console.error(`FATAL chain "${CHAIN}" has no usable RPC (got "${RPC}"). Fix chains/${CHAIN}/chain.yaml.`);
   process.exit(3);
 }
 
@@ -164,6 +140,12 @@ async function buildOverrides(gasLimit) {
         L('initialize skipped — already initialized');
       }
     };
+  } else if (KIND === 'HypXERC20') {
+    // EIP-7281 xERC20 wrapper. The router calls mint/burn on the underlying
+    // xERC20; bridging limits are enforced inside the xERC20 (caller must
+    // set them via xerc20.setLimits(router, mint, burn) — see ADD_TOKEN.md).
+    factory = core.HypXERC20__factory;
+    ctorArgs = [UNDERLYING, chCfg.mailbox];
   } else {
     console.error(`FATAL unknown ROUTER_KIND "${KIND}"`); process.exit(2);
   }
@@ -188,6 +170,26 @@ async function buildOverrides(gasLimit) {
   L('deployed', c.address, 'block', rcpt.blockNumber);
 
   if (postDeploy) await postDeploy(c);
+
+  // Auto-register in shared/addresses.yaml so admin tools (update_ism,
+  // gen_state) see the new router. SKIP_YAML_REGISTER=1 to bypass.
+  if (REGISTER_IN_YAML) {
+    const sym = out.symbol === '<native>' || out.symbol === '<collateral>'
+      ? (chCfg.native?.symbol || CHAIN.toUpperCase()) : out.symbol;
+    try {
+      const args = ['/work/tools/yaml_promote.mjs', 'add-router', CHAIN, sym, KIND, out.address];
+      if (UNDERLYING) args.push(UNDERLYING);
+      const res = execFileSync('node', args, { encoding: 'utf8', cwd: '/work/tools' });
+      L('yaml registered:', res.trim());
+    } catch (e) {
+      // Non-fatal: log + move on. Operator can re-run `yaml_promote add-router`
+      // manually if needed (e.g. yaml deps not installed in the runner).
+      L('WARN: yaml registration failed (router still deployed on-chain):',
+        e?.stdout?.toString() || e?.message || e);
+    }
+  } else {
+    L('SKIP_YAML_REGISTER=1 — caller will register the router manually');
+  }
 
   L('DONE', JSON.stringify(out, null, 2));
 })().catch(e => {

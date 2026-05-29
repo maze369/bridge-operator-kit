@@ -29,6 +29,7 @@ relayer-r*/
 # Operator-scratch helpers (anything prefixed with `_` is not part of the kit).
 # Exception: `deployer/_run_deploy.sh` is the core docker-runner wrapper.
 tools/_*
+_legacy_run/
 
 # Node + Python
 **/node_modules/

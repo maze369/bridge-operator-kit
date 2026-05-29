@@ -239,6 +239,44 @@ can't un-announce), but a validator not in the active ISM is harmless
 
 ---
 
+## Drift recovery — `promote_operator.sh sync`
+
+`add-validator` and `remove-validator` iterate every router listed
+under `chains.<k>.routers` in `shared/addresses.yaml` and swap each to
+the new ISM. If a router was deployed on-chain but never registered in
+the yaml (e.g. an early drill, a hand-rolled deploy, an
+`ADD_TOKEN` flow where Step 6 was skipped), it's invisible to the
+add/remove flow and its ISM stays pointed at whatever validator set
+was active when it was deployed. When that validator later retires,
+the orphan router silently stops verifying messages.
+
+To recover from this kind of drift:
+
+1. Discover the orphan router and underlying — read
+   `router.interchainSecurityModule()` and `router.wrappedToken()` (or
+   `router.underlying()`) off chain.
+2. Register it in the yaml: `node tools/yaml_promote.mjs add-router
+   <chain> <symbol> <kind> <router-addr> [underlying-addr]`.
+3. Run `bash tools/promote_operator.sh sync`. This re-runs
+   `update_ism.mjs` with the current `ismValidators` + `ismThreshold`
+   from `addresses.yaml`, deploys the target ISM if it's missing
+   (CREATE2-deterministic — no-op if already on chain), and swaps any
+   router whose `interchainSecurityModule()` doesn't match the
+   chain's declared `ism`.
+
+`sync` is idempotent — safe to run any time. It's a useful sanity
+check after a multi-chain rotation, or whenever you suspect the
+on-chain state has diverged from the yaml.
+
+> **Trust order.** `update_ism.mjs` treats
+> `chains.<k>.ism` in `addresses.yaml` as the canonical target. If the
+> yaml's `ism` is non-zero and has bytecode on chain, that address is
+> used directly — no fresh CREATE2 deploy. Set
+> `FORCE_REDEPLOY_ISM=1` to override (e.g. when actually rotating the
+> validator set, not just reconciling).
+
+---
+
 ## What "live" means before the admin adds you
 
 Between step 4 (agent running) and step 5 (admin adds you to the ISM),
