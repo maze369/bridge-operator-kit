@@ -160,6 +160,22 @@ THRESHOLD=N \
 bash tools/promote_operator.sh add-validator <new-validator-addr>
 ```
 
+> **Per-chain owner keys.** If the bridge has different EOA owners on
+> different chains (common when chains were deployed at different
+> times by different people), set `DEPLOYER_KEY_<CHAIN_UPPER>_FILE`
+> for each chain that needs a non-default key. The runner forwards
+> each as `HYP_KEY_<CHAIN>` to the deploy container and
+> `update_ism.mjs` picks the per-chain key when present, falling
+> back to the default `DEPLOYER_KEY` otherwise. Example for a bridge
+> whose Creative routers are owned by a separate EOA:
+>
+> ```bash
+> DEPLOYER_KEY_FILE=/path/to/default-admin.key \
+> DEPLOYER_KEY_CREATIVE_FILE=/path/to/creative-admin.key \
+> THRESHOLD=2 \
+> bash tools/promote_operator.sh add-validator <addr>
+> ```
+
 `promote_operator.sh` auto-detects which authorization mode the bridge
 is in by reading `router.owner()`:
 
